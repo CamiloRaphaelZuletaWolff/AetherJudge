@@ -276,6 +276,32 @@ gateway exists.)
 
 For now, leave port 9090 closed. Judging won't work until 3.4 — that's expected.
 
+### 2.6 The executor stays running on its own
+
+You don't need to do anything to keep it alive — the `docker run` command in 2.4
+already handles it:
+
+- **`-d`** runs it in the background, so **closing your SSH session does not stop
+  it**.
+- **`--restart unless-stopped`** means Docker restarts it if it crashes, and
+  because Docker itself starts on boot (`systemctl enable --now docker`), the
+  executor **comes back automatically after a server reboot**.
+
+Useful commands when you SSH back in later:
+
+```bash
+docker ps                 # should show `executor` as "Up ..."
+docker logs -f executor   # live logs (Ctrl-C to stop watching)
+docker restart executor   # restart it
+docker stop executor      # stop it (it will NOT auto-start again until you start it)
+docker start executor     # start it again
+```
+
+If `docker ps` doesn't list it (e.g. it exited during setup), check
+`docker logs executor` for the reason, then re-run the `docker run` block from
+2.4. Confirm Docker is set to start on boot with
+`sudo systemctl is-enabled docker` (should print `enabled`).
+
 ---
 
 ## Part 3 — Deploy the gateway on Render
@@ -324,15 +350,38 @@ curl <GATEWAY_URL>/healthz      # -> {"status":"ok"}
 
 ### 3.3 Load the demo data
 
-So your live app has a contest and demo users to show off:
+Your live app needs a contest and demo users. Render's in-dashboard **Shell** is
+a paid feature, so run the seeder **from your own computer** against the
+database's public URL instead. You need Go and this repo cloned locally.
 
-1. On the `aether-api-gateway` service page, open the **Shell** tab.
-2. Run:
-   ```bash
-   /seed
+1. **Get the External Database URL.** Render → `aether-db` → **Connect** → copy
+   the **External Database URL** (its host ends in `.oregon-postgres.render.com`).
+   Make sure it ends with `?sslmode=require`; add that if it's missing.
+2. **Allow your computer to connect.** Render → `aether-db` → **Access Control**
+   → add your current IP (Render can detect it), or temporarily `0.0.0.0/0`
+   (tighten it again afterwards).
+3. **Run the seeder** from the repo. It refuses to run in production mode, so
+   keep `APP_ENV` at its `dev` default — set it to `dev` explicitly to be safe:
+
+   **Windows (PowerShell):**
+   ```powershell
+   cd backend/services/api-gateway
+   $env:APP_ENV = "dev"
+   $env:DATABASE_URL = "<EXTERNAL_DATABASE_URL>"
+   go run ./cmd/seed
    ```
-   This creates the "Arena Demo Contest" and users **alice** / **bob** (password
-   `password123`). You should see `seeding complete` (or similar).
+   **macOS / Linux:**
+   ```bash
+   cd backend/services/api-gateway
+   APP_ENV=dev DATABASE_URL="<EXTERNAL_DATABASE_URL>" go run ./cmd/seed
+   ```
+4. You should see `created demo user alice` / `bob` and contest-creation logs.
+   The demo contest and users (alice/bob, password `password123`) now live in
+   your database. Re-running is safe (idempotent).
+5. (Optional) Re-tighten the database **Access Control** afterwards.
+
+> The seeder talks only to the database — Redis and the executor don't need to
+> be running for this step.
 
 ### 3.4 Lock the EC2 port to Render
 
