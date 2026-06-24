@@ -1,0 +1,42 @@
+# Render Blueprint — AetherJudge backend (api-gateway).
+#
+# The gateway runs here; the `executor` runs elsewhere (a VM or Kubernetes)
+# because it sandboxes untrusted code by launching sibling Docker containers,
+# which needs a privileged Docker daemon Render does not provide. Set
+# EXECUTOR_ADDR to that host's gRPC address (host:port) and JUDGE_WORKERS to a
+# positive number so the gateway judges submissions against it. The full
+# free-tier walkthrough (gateway here, executor on AWS EC2, frontend on Vercel)
+# is in DEPLOY.md.
+#
+# IMPORTANT: both Dockerfiles expect the build context to be `backend/`
+# (they COPY `pkg/` and `services/...`). That is set via dockerContext below.
+
+services:
+  - type: web
+    name: aether-api-gateway
+    runtime: docker
+    plan: free
+    region: oregon                                 # MUST match your Postgres/Key Value region
+    dockerfilePath: ./backend/services/api-gateway/Dockerfile
+    dockerContext: ./backend                       # <-- the fix for the "not found" build error
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production                          # enables secure cookies; requires a strong JWT_SECRET
+      - key: LOG_FORMAT
+        value: json
+      - key: GATEWAY_HTTP_ADDR
+        value: ":10000"                            # Render routes to port 10000 by default
+      - key: JWT_SECRET
+        generateValue: true                        # Render generates a strong random secret
+      - key: JUDGE_WORKERS
+        value: "2"                                 # gateway consumes the queue and judges via the executor
+      - key: EXECUTOR_ADDR
+        sync: false                                # your executor host's gRPC address, e.g. 54.12.34.56:9090
+      - key: DATABASE_URL
+        sync: false                                # paste your Render Postgres *Internal* Database URL
+      - key: REDIS_ADDR
+        sync: false                                # host:port of a Render Key Value (NOT a redis:// URL, NOT Upstash)
+      - key: FRONTEND_ORIGIN
+        sync: false                                # your frontend's origin, e.g. https://aether.vercel.app

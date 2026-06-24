@@ -1,0 +1,14 @@
+# Local Kubernetes cluster for Arena (https://kind.sigs.k8s.io).
+# Single node: the dev machine gives Docker ~6 GB total, and the executor's
+# DinD sidecar is the hungry tenant.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: arena
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Gateway NodePort → host. 8091: not 8080 (the native dev gateway) and
+      # not 8090 (squatted by a Wondershare service on the dev machine).
+      - containerPort: 30080
+        hostPort: 8091
+        protocol: TCP

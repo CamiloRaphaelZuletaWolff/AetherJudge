@@ -1,0 +1,206 @@
+# The executor (see ADR-0009 for the DinD sidecar, ADR-0011 for scaling).
+#
+# A StatefulSet, not a Deployment, because each replica needs its OWN DinD
+# image store: the per-pod PVC comes from volumeClaimTemplates, so replicas do
+# not contend on one RWO volume. A HEADLESS Service gives every pod a stable
+# DNS A record, which lets the gateway/worker fan Execute calls across all
+# replicas via gRPC client-side round-robin (dns:///… + round_robin).
+#
+#   initContainers:
+#     copy-sandbox-images  surface the baked-in Dockerfiles to the build step
+#     dind                 docker:dind native sidecar (the only privileged
+#                          container), loopback-only daemon
+#     build-sandbox-images one-shot build of the three sandbox images
+#   containers:
+#     executor             unprivileged; talks to its pod-local dind over TCP
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-executor
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  # Headless: DNS returns every pod IP so gRPC can round-robin across them,
+  # and it doubles as the StatefulSet governing Service.
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: executor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: grpc
+      port: 9090
+      targetPort: 9090
+---
+# Headless metrics Service: Prometheus DNS-SD resolves it to every pod IP and
+# scrapes each replica (no per-pod ClusterIP round-robin hiding pods).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-executor-metrics
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: executor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: metrics
+      port: 9101
+      targetPort: 9101
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-executor
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ .Release.Name }}-executor
+  replicas: {{ .Values.executor.replicas }}
+  # Replicas are independent (no ordering between sandboxes); bring them up
+  # together rather than one-at-a-time.
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: executor
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: executor
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- include "arena.labels" . | nindent 8 }}
+    spec:
+      initContainers:
+        # Surface the sandbox Dockerfiles (baked into the executor image)
+        # to the docker-cli build step via a shared emptyDir.
+        - name: copy-sandbox-images
+          image: "{{ .Values.executor.image }}:{{ .Values.executor.tag }}"
+          command: ["/bin/sh", "-c", "cp -R /sandbox-images/. /out/"]
+          volumeMounts:
+            - name: sandbox-images
+              mountPath: /out
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+        - name: dind
+          image: {{ .Values.executor.dind.image }}
+          # Native sidecar: starts before (and outlives) the main container.
+          restartPolicy: Always
+          securityContext:
+            privileged: true
+          env:
+            # Pod-local TCP only; TLS adds nothing between containers that
+            # already share a network namespace.
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          # Full dockerd command: passing only flags would make the image's
+          # entrypoint ADD its default 0.0.0.0:2375 listener alongside ours,
+          # and dockerd dies binding the same port twice. Explicit hosts keep
+          # the daemon loopback-only — pod-IP-reachable daemons hand root to
+          # any pod in the cluster.
+          args:
+            - dockerd
+            - --host=unix:///var/run/docker.sock
+            - --host=tcp://127.0.0.1:2375
+          volumeMounts:
+            - name: dind-storage
+              mountPath: /var/lib/docker
+          # Exec probe, NOT tcpSocket: kubelet dials tcpSocket probes against
+          # the pod IP, and this daemon is deliberately loopback-only — an
+          # exec probe runs inside the container's netns where 127.0.0.1 is
+          # the right address.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "nc -z 127.0.0.1 2375"]
+            periodSeconds: 2
+            failureThreshold: 90
+          resources:
+            {{- toYaml .Values.executor.dind.resources | nindent 12 }}
+        - name: build-sandbox-images
+          image: {{ .Values.executor.cli.image }}
+          env:
+            - name: DOCKER_HOST
+              value: tcp://127.0.0.1:2375
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              for lang in cpp python go; do
+                if ! docker image inspect "arena-sandbox-$lang:latest" >/dev/null 2>&1; then
+                  echo "building arena-sandbox-$lang"
+                  docker build -t "arena-sandbox-$lang:latest" \
+                    -f "/sandbox-images/$lang.Dockerfile" /sandbox-images
+                else
+                  echo "arena-sandbox-$lang already present"
+                fi
+              done
+          volumeMounts:
+            - name: sandbox-images
+              mountPath: /sandbox-images
+              readOnly: true
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { cpu: "2", memory: 512Mi }
+      containers:
+        - name: executor
+          image: "{{ .Values.executor.image }}:{{ .Values.executor.tag }}"
+          env:
+            - name: EXECUTOR_DOCKER_HOST
+              value: tcp://127.0.0.1:2375
+            - name: EXECUTOR_GRPC_ADDR
+              value: ":9090"
+            - name: EXECUTOR_MAX_CONCURRENT
+              value: {{ .Values.executor.maxConcurrent | quote }}
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Release.Name }}-config
+                  key: LOG_LEVEL
+            - name: LOG_FORMAT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Release.Name }}-config
+                  key: LOG_FORMAT
+            {{- if .Values.observability.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://tempo:4317
+            {{- end }}
+          ports:
+            - name: grpc
+              containerPort: 9090
+            - name: metrics
+              containerPort: 9101
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            # Numeric UID required: with a named USER in the image, kubelet
+            # cannot verify non-rootness and refuses to start the container.
+            runAsUser: 10001
+          livenessProbe:
+            grpc:
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc:
+              port: 9090
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.executor.resources | nindent 12 }}
+      volumes:
+        - name: sandbox-images
+          emptyDir: {}
+  volumeClaimTemplates:
+    # One DinD image store per replica — no RWO contention, and each pod's
+    # sandbox images build once and persist across restarts.
+    - metadata:
+        name: dind-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.executor.dind.storageSize }}

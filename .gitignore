@@ -1,0 +1,57 @@
+# --- Go ---
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.txt
+coverage.html
+.agents
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+.pnpm-store/
+
+# --- Environment ---
+# Never commit a real env file anywhere in the tree. Only the committed
+# *.example templates (placeholders, no secrets) are allowed through.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# --- Tooling caches ---
+.task/
+.eslintcache
+.turbo/
+# graphify knowledge-graph output (generated; rebuild with `graphify update .`)
+graphify-out/
+
+# --- Terraform ---
+# (.terraform.lock.hcl is committed on purpose: it pins provider versions)
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+# kubeconfig the kind provider drops next to the module
+infra/terraform/local/*-config
+
+# --- Internal working docs (kept local, not part of the public artifact) ---
+/CLAUDE.md
+/MANUAL_SETUP_GUIDE.md
+/docs/phases/
+/docs/benchmarks/
+
+# --- IDE / OS ---
+.claude/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

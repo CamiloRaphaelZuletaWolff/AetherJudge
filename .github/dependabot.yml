@@ -1,0 +1,53 @@
+version: 2
+
+updates:
+  # --- Go modules (one entry per module in the workspace) ---
+  - package-ecosystem: gomod
+    directory: /backend/pkg
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: gomod
+    directory: /backend/services/api-gateway
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: gomod
+    directory: /backend/services/executor
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+
+  # --- Frontend (npm via pnpm lockfile) ---
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  # --- GitHub Actions ---
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # --- Dockerfiles ---
+  - package-ecosystem: docker
+    directory: /backend/services/api-gateway
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /backend/services/executor
+    schedule:
+      interval: weekly

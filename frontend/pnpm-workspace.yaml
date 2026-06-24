@@ -1,0 +1,12 @@
+allowBuilds:
+  # sharp powers next/image optimization; unrs-resolver backs eslint-config-next.
+  # Both need their native postinstall builds.
+  sharp: true
+  unrs-resolver: true
+
+# Pin ESLint tree-wide. eslint-config-next 15.5.x patches ESLint via
+# @rushstack/eslint-patch, which breaks on ESLint 10 ("calling module was not
+# recognized"). The override guarantees no transitive resolution can pull v10
+# regardless of cache state.
+overrides:
+  eslint: 9.39.4

@@ -1,0 +1,101 @@
+# Local development infrastructure for Arena.
+#
+# Runs the stateful dependencies only; the Go services and the frontend run
+# natively on the host for fast iteration (see the README Quickstart).
+#
+#   docker compose -f infra/docker/docker-compose.yml up -d
+name: arena
+
+services:
+  postgresArena:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arena}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arena_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-arena}
+    # Host port defaults to 55432: the standard 5432 is commonly occupied by
+    # a native PostgreSQL install (it is on the primary dev machine).
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-arena} -d $${POSTGRES_DB:-arena}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # No persistence: Redis holds only ephemeral state (pub/sub, leaderboard
+    # caches, rate-limit counters). PostgreSQL is the source of truth, so a
+    # Redis restart must never matter. See docs/adr/0004-postgres-redis-roles.md.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # Host port defaults to 56379 for the same reason as PostgreSQL above
+    # (WSL relays and local Redis installs squat on 6379).
+    ports:
+      - "${REDIS_PORT:-56379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ----- observability (profile "obs": task obs:up / obs:down) -----
+  #
+  # Configs, dashboards and alert rules are single-sourced from
+  # infra/helm/arena/files/observability/ — the Helm chart ships the same
+  # files into the cluster. Host ports follow the project convention of
+  # dodging squatters: 9090 is the executor's gRPC port and 3000 is `next
+  # dev`, hence 59090/53000.
+
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    profiles: ["obs"]
+    restart: unless-stopped
+    volumes:
+      - ../helm/arena/files/observability/prometheus-compose.yml:/etc/prometheus/prometheus.yml:ro
+      - ../helm/arena/files/observability/rules.yml:/etc/prometheus/rules.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-59090}:9090"
+    # The services run natively on the host in dev; on Docker Desktop this
+    # alias exists out of the box, the extra_hosts makes plain Linux work too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  tempo:
+    image: grafana/tempo:2.8.1
+    profiles: ["obs"]
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ../helm/arena/files/observability/tempo.yml:/etc/tempo.yml:ro
+      - tempodata:/var/tempo
+    # OTLP gRPC ingest — the address the services' OTEL_EXPORTER_OTLP_ENDPOINT
+    # points at (http://localhost:4317).
+    ports:
+      - "${OTLP_PORT:-4317}:4317"
+
+  grafana:
+    image: grafana/grafana:12.0.2
+    profiles: ["obs"]
+    restart: unless-stopped
+    environment:
+      # Dev-only: no login, straight to the dashboards. Never ship this.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ../helm/arena/files/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../helm/arena/files/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-53000}:3000"
+    depends_on:
+      - prometheus
+      - tempo
+
+volumes:
+  pgdata:
+  tempodata:

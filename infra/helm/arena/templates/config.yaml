@@ -1,0 +1,34 @@
+# Non-secret runtime configuration shared by the gateway and seed job, plus
+# the Secret carrying credentials. Production note: replace the Secret with
+# an externally managed one (SOPS / external-secrets) — the chart only needs
+# the names to match.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+data:
+  APP_ENV: {{ .Values.config.appEnv | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  GATEWAY_HTTP_ADDR: ":8080"
+  REDIS_ADDR: "{{ .Release.Name }}-redis:6379"
+  # dns:/// + a HEADLESS service so the gRPC client load-balances Execute
+  # calls across every executor replica (round_robin; see judge.Dial).
+  EXECUTOR_ADDR: "dns:///{{ .Release.Name }}-executor.{{ .Release.Namespace }}.svc.cluster.local:9090"
+  FRONTEND_ORIGIN: {{ .Values.config.frontendOrigin | quote }}
+  # JUDGE_WORKERS is set per-tier in the deployments (web tier = 0, the worker
+  # deployment runs the consumers).
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-secrets
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  JWT_SECRET: {{ .Values.auth.jwtSecret | quote }}
+  DATABASE_URL: {{ include "arena.databaseUrl" . | quote }}
+  POSTGRES_PASSWORD: {{ .Values.postgres.password | quote }}

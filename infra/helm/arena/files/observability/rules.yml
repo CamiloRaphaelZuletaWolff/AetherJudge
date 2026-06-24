@@ -1,0 +1,50 @@
+# Alert rules, shared by both deploy shapes (compose mounts this file; the
+# Helm chart ships it via ConfigMap). Delivery/routing (Alertmanager) is a
+# documented non-goal of Phase 6 — firing alerts are visible in the
+# Prometheus UI and on the dashboards.
+groups:
+  - name: arena
+    rules:
+      - alert: ArenaServiceDown
+        expr: up{job=~"arena-.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} target is down"
+          description: "Prometheus has not scraped {{ $labels.job }} successfully for 2 minutes."
+
+      - alert: JudgeInternalErrors
+        expr: rate(arena_judge_jobs_total{verdict="internal_error"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Submissions are failing with internal_error"
+          description: "The judge pipeline is producing internal errors (executor unreachable, sandbox failures, or DB errors)."
+
+      - alert: GatewayHighLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(arena_http_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway p95 latency above 500ms"
+          description: "REST latency is degraded across routes (p95 > 500ms for 10 minutes)."
+
+      - alert: JudgeQueueBacklog
+        expr: arena_judge_queue_depth > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Judge queue is backing up"
+          description: "More than 100 submissions are waiting; judging capacity is saturated (see arena_executor_admission_wait_seconds)."
+
+      - alert: RefreshTokenReuse
+        expr: increase(arena_auth_refresh_reuse_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Refresh-token reuse detected"
+          description: "A rotated refresh token was replayed; a token family was revoked. Investigate for credential theft."

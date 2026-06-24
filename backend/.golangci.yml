@@ -1,0 +1,20 @@
+# golangci-lint v2 configuration shared by every module in the Go workspace.
+# Run from each module directory; config discovery walks up to this file.
+version: "2"
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - gosec    # security checks; this repo executes untrusted code, so on by default
+    - misspell
+    - revive
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/caezu/arena

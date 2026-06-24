@@ -1,0 +1,26 @@
+# Shared by both deploy shapes: the Prometheus and Tempo services carry the
+# same fixed DNS names in compose and in the cluster (the observability
+# stack is a singleton, so the usual release-name prefix buys nothing and
+# would force two copies of this file).
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 5s
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: ""
+      serviceMap:
+        datasourceUid: prometheus

@@ -1,0 +1,278 @@
+{{- if .Values.observability.enabled }}
+# In-cluster observability stack (values-gated, default off — see values.yaml
+# for the memory-budget reasoning). Dashboards, alert rules, Tempo and
+# Grafana provisioning are the SAME files the compose stack mounts
+# (files/observability/); only this Prometheus scrape config is
+# cluster-specific because it needs release-prefixed Service DNS names.
+#
+# Service names are deliberately NOT release-prefixed: grafana's datasource
+# file is shared with compose and points at http://prometheus:9090 and
+# http://tempo:3200 — fixed names make one file serve both shapes. The stack
+# is a singleton per namespace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-prometheus-config
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      evaluation_interval: 15s
+    rule_files:
+      - /etc/prometheus/rules.yml
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+      # DNS-SD against the headless metrics Services: the A record resolves to
+      # every pod IP, so each replica is scraped (a ClusterIP would round-robin
+      # scrapes and hide pods). No Kubernetes API / RBAC needed.
+      - job_name: arena-gateway
+        dns_sd_configs:
+          - names: ["{{ .Release.Name }}-gateway-metrics.{{ .Release.Namespace }}.svc.cluster.local"]
+            type: A
+            port: 9100
+      {{- if .Values.worker.enabled }}
+      - job_name: arena-worker
+        dns_sd_configs:
+          - names: ["{{ .Release.Name }}-worker-metrics.{{ .Release.Namespace }}.svc.cluster.local"]
+            type: A
+            port: 9100
+      {{- end }}
+      - job_name: arena-executor
+        dns_sd_configs:
+          - names: ["{{ .Release.Name }}-executor-metrics.{{ .Release.Namespace }}.svc.cluster.local"]
+            type: A
+            port: 9101
+  rules.yml: |
+{{ .Files.Get "files/observability/rules.yml" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-tempo-config
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+data:
+  tempo.yml: |
+{{ .Files.Get "files/observability/tempo.yml" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-provisioning
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+data:
+  datasources.yml: |
+{{ .Files.Get "files/observability/grafana/provisioning/datasources/datasources.yml" | indent 4 }}
+  dashboards.yml: |
+{{ .Files.Get "files/observability/grafana/provisioning/dashboards/dashboards.yml" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboards
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+data:
+{{ (.Files.Glob "files/observability/grafana/dashboards/*.json").AsConfig | indent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-prometheus
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- include "arena.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ .Values.observability.prometheus.image }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            # Ephemeral by design: dashboards answer "now", Tempo keeps 24h
+            # of traces; durable metrics history is not a dev-cluster goal.
+            - --storage.tsdb.retention.time=24h
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+          resources:
+            {{- toYaml .Values.observability.prometheus.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-prometheus-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-tempo
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tempo
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- include "arena.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: tempo
+          image: {{ .Values.observability.tempo.image }}
+          args:
+            - -config.file=/etc/tempo/tempo.yml
+          ports:
+            - containerPort: 3200
+            - containerPort: 4317
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+              readOnly: true
+            - name: data
+              mountPath: /var/tempo
+          resources:
+            {{- toYaml .Values.observability.tempo.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-tempo-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-grafana
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: grafana
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- include "arena.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: grafana
+          image: {{ .Values.observability.grafana.image }}
+          env:
+            # Dev-only: no login, straight to the dashboards (same posture
+            # as the compose stack; documented in the chart README).
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: Admin
+            - name: GF_AUTH_DISABLE_LOGIN_FORM
+              value: "true"
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: provisioning-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: provisioning-dashboards
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+          resources:
+            {{- toYaml .Values.observability.grafana.resources | nindent 12 }}
+      volumes:
+        - name: provisioning-datasources
+          configMap:
+            name: {{ .Release.Name }}-grafana-provisioning
+            items:
+              - key: datasources.yml
+                path: datasources.yml
+        - name: provisioning-dashboards
+          configMap:
+            name: {{ .Release.Name }}-grafana-provisioning
+            items:
+              - key: dashboards.yml
+                path: dashboards.yml
+        - name: dashboards
+          configMap:
+            name: {{ .Release.Name }}-grafana-dashboards
+{{- end }}

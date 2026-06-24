@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+// Package executor.v1 defines the internal contract between the api-gateway
+// and the executor service, which runs untrusted user code in isolated
+// sandboxes.
+//
+// The contract is deliberately request/response shaped: in the MVP the
+// gateway calls Execute synchronously, and in Phase 7 the same message types
+// ride a Redis-backed queue without the executor's core changing.
+package executor.v1;
+
+// ExecutorService compiles and runs untrusted source code under strict
+// resource limits and returns a competitive-programming verdict.
+service ExecutorService {
+  // Execute runs source code against a single test case.
+  //
+  // The call is synchronous and bounded: compilation and execution each run
+  // under hard server-side limits, so the worst-case latency is limited by
+  // the configured compile and run timeouts.
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}
+
+// Language enumerates the runtimes the executor ships sandbox images for.
+enum Language {
+  LANGUAGE_UNSPECIFIED = 0;
+  LANGUAGE_CPP = 1;
+  LANGUAGE_PYTHON = 2;
+  LANGUAGE_GO = 3;
+}
+
+// Verdict is the outcome of judging one execution, mirroring standard
+// competitive-programming judge semantics.
+enum Verdict {
+  VERDICT_UNSPECIFIED = 0;
+  // The program ran successfully and its output matched expected_output.
+  VERDICT_ACCEPTED = 1;
+  // The program ran successfully but its output did not match.
+  VERDICT_WRONG_ANSWER = 2;
+  // The program exited non-zero or crashed (signal, uncaught exception).
+  VERDICT_RUNTIME_ERROR = 3;
+  // The source code failed to compile (C++/Go) or parse (Python).
+  VERDICT_COMPILATION_ERROR = 4;
+  // The program exceeded the wall-clock time limit and was killed.
+  VERDICT_TIME_LIMIT_EXCEEDED = 5;
+  // The program exceeded the memory limit and was killed.
+  VERDICT_MEMORY_LIMIT_EXCEEDED = 6;
+  // The executor itself failed; the submission should be retried, not judged.
+  VERDICT_INTERNAL_ERROR = 7;
+}
+
+// ExecuteRequest carries one piece of source code and one test case.
+message ExecuteRequest {
+  // Source code, UTF-8. Size limits are enforced server-side.
+  string code = 1;
+  Language language = 2;
+  // Data piped to the program's standard input.
+  string stdin = 3;
+  // Expected standard output; comparison ignores trailing whitespace per line.
+  string expected_output = 4;
+  // Wall-clock limit in milliseconds. Zero means the server default.
+  // The executor clamps this to its configured hard maximum.
+  uint32 time_limit_ms = 5;
+  // Memory limit in megabytes. Zero means the server default.
+  // The executor clamps this to its configured hard maximum.
+  uint32 memory_limit_mb = 6;
+}
+
+// ExecuteResponse reports the judged outcome of one execution.
+message ExecuteResponse {
+  Verdict verdict = 1;
+  // Program output, truncated server-side to a sane maximum.
+  string stdout = 2;
+  string stderr = 3;
+  // Exit code of the user process; meaningful for RUNTIME_ERROR diagnostics.
+  int32 exit_code = 4;
+  // Observed wall-clock runtime in milliseconds.
+  uint32 time_used_ms = 5;
+  // Peak memory usage in kilobytes, when the sandbox can report it.
+  uint32 memory_used_kb = 6;
+  // Compiler diagnostics; populated for COMPILATION_ERROR.
+  string compile_output = 7;
+}

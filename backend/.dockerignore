@@ -1,0 +1,6 @@
+# Build context = backend/. Keep it lean: only Go sources and go.mod/sum
+# matter to the service Dockerfiles.
+**/*_test.go
+**/testdata/
+go.work
+go.work.sum

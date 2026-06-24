@@ -1,0 +1,127 @@
+# Default values target the local Kind cluster on a small dev machine.
+# Production guidance lives in the chart README (managed PG/Redis, registry
+# images, a real secret store).
+
+gateway:
+  image: arena-gateway
+  tag: dev
+  replicas: 1
+  # NodePort matches infra/k8s/kind-config.yaml's port mapping.
+  nodePort: 30080
+  # 0: the web tier only accepts submissions; the worker deployment judges
+  # them (set >0 to also judge in-process — handy for a single-replica setup).
+  judgeWorkers: 0
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: "1", memory: 256Mi }
+
+# The judge worker (cmd/worker) consumes the durable queue, scaled
+# independently of the gateway (ADR-0011).
+worker:
+  enabled: true
+  replicas: 1
+  # Consumer goroutines per worker pod.
+  judgeWorkers: 2
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+executor:
+  image: arena-executor
+  tag: dev
+  # Horizontal fan-out: each replica is its own StatefulSet pod with its own
+  # DinD store; the gateway/worker round-robin Execute across them. Default 1
+  # for the small dev box; bump for the scaling gate.
+  replicas: 1
+  maxConcurrent: 1
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  dind:
+    image: docker:28-dind
+    # The Docker daemon hosts compilers (g++ peaks ~512Mi) plus the running
+    # sandbox; this limit bounds the whole judging universe of one replica.
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "2", memory: 2Gi }
+    # Image store persists across pod restarts so sandbox images build once
+    # per cluster.
+    storageSize: 6Gi
+  cli:
+    # Used by the init container that builds the sandbox images.
+    image: docker:28-cli
+
+postgres:
+  image: postgres:16-alpine
+  database: arena
+  user: arena
+  # Dev-grade credential; override via --set for anything shared.
+  password: arena_dev_password
+  storageSize: 1Gi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  # Set to a full DSN to use an external/managed database instead of the
+  # in-cluster StatefulSet (which is then not rendered).
+  externalDatabaseUrl: ""
+
+redis:
+  image: redis:7-alpine
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+auth:
+  # Dev-grade secret (>= 32 chars). Override via --set auth.jwtSecret=... or
+  # replace the Secret with an externally managed one.
+  jwtSecret: kind-local-dev-secret-0123456789abcdef0123456789
+
+config:
+  appEnv: dev
+  logLevel: info
+  logFormat: json
+  # CORS origin for the locally running frontend (pnpm dev) pointed at the
+  # cluster via the NodePort.
+  frontendOrigin: http://localhost:3000
+
+seed:
+  # Renders a post-install/post-upgrade Job that seeds the demo contest and
+  # demo users. Disable for anything resembling a real deployment.
+  enabled: true
+
+autoscaling:
+  # CPU-based HPA on the worker + executor (ADR-0011). Default OFF: it needs
+  # metrics-server, and on one small node it mostly demonstrates the wiring.
+  enabled: false
+  worker:
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+  executor:
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+
+observability:
+  # Deploys Prometheus + Tempo + Grafana in-cluster and points both services'
+  # OTLP exporters at Tempo. Default OFF: the 6 GB dev Docker VM already runs
+  # close to its ceiling with DinD (verified on at the Phase 6 gate).
+  # Configs/dashboards/rules are chart files shared with the compose stack
+  # (files/observability/). Scraping uses DNS-SD against the headless metrics
+  # Services, so every replica is scraped (no Kubernetes API / RBAC needed).
+  enabled: false
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 256Mi }
+  tempo:
+    image: grafana/tempo:2.8.1
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 256Mi }
+  grafana:
+    image: grafana/grafana:12.0.2
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 256Mi }

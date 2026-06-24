@@ -1,0 +1,9 @@
+apiVersion: v2
+name: arena
+description: >-
+  Real-time competitive programming platform: api-gateway (REST/WebSocket),
+  executor (sandboxed judging via a pod-local Docker-in-Docker daemon),
+  PostgreSQL, and Redis.
+type: application
+version: 0.1.0
+appVersion: "0.5.0"

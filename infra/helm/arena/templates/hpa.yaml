@@ -1,0 +1,52 @@
+{{- if .Values.autoscaling.enabled }}
+# CPU-based autoscaling for the elastic tiers (ADR-0011). The judge worker and
+# the executor are what a submission surge actually loads; the web gateway is
+# lightweight and stays at its fixed replica count. Honest caveat: on a
+# single small node this mostly demonstrates the wiring (requires
+# metrics-server); judge work is Docker/IO-bound, so CPU is an imperfect
+# signal — a metrics-based HPA on arena_judge_queue_depth is the production
+# refinement (needs a custom-metrics adapter, out of scope here).
+{{- if .Values.worker.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-worker
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-worker
+  minReplicas: {{ .Values.autoscaling.worker.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.worker.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.worker.targetCPUUtilizationPercentage }}
+---
+{{- end }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-executor
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ .Release.Name }}-executor
+  minReplicas: {{ .Values.autoscaling.executor.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.executor.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.executor.targetCPUUtilizationPercentage }}
+{{- end }}

@@ -1,0 +1,305 @@
+# Project command runner — https://taskfile.dev
+#
+# Used instead of Make because it behaves identically on Windows, macOS, and
+# Linux (commands run in a built-in POSIX shell interpreter).
+# Install: go install github.com/go-task/task/v3/cmd/task@v3.51.1
+version: "3"
+
+vars:
+  # The three Go modules in the backend workspace. Tasks iterate over this
+  # list because go/golangci-lint operate per module, not per workspace.
+  GO_MODULES: pkg services/api-gateway services/executor
+  # Tool versions are pinned so local dev and CI run identical toolchains.
+  BUF_VERSION: v1.70.0
+  PROTOC_GEN_GO_VERSION: v1.36.11
+  PROTOC_GEN_GO_GRPC_VERSION: v1.6.2
+  GOLANGCI_LINT_VERSION: v2.12.2
+  GOVULNCHECK_VERSION: v1.1.4
+  COMPOSE_FILE: infra/docker/docker-compose.yml
+
+tasks:
+  default:
+    desc: List available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  env:init:
+    desc: Create local .env files from their examples (idempotent; generates a JWT secret)
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/env-init.ps1
+        platforms: [windows]
+      - cmd: sh scripts/env-init.sh
+        platforms: [linux, darwin]
+
+  # ----- tooling -----
+
+  tools:install:
+    desc: Install all pinned development tools into GOPATH/bin
+    cmds:
+      - task: tools:install:proto
+      - task: tools:install:lint
+      - task: tools:install:security
+
+  tools:install:proto:
+    desc: Install buf and the protoc Go plugins (pinned)
+    cmds:
+      - go install github.com/bufbuild/buf/cmd/buf@{{.BUF_VERSION}}
+      - go install google.golang.org/protobuf/cmd/protoc-gen-go@{{.PROTOC_GEN_GO_VERSION}}
+      - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@{{.PROTOC_GEN_GO_GRPC_VERSION}}
+
+  tools:install:lint:
+    desc: Install golangci-lint (pinned)
+    cmds:
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_LINT_VERSION}}
+
+  tools:install:security:
+    desc: Install govulncheck (pinned)
+    cmds:
+      - go install golang.org/x/vuln/cmd/govulncheck@{{.GOVULNCHECK_VERSION}}
+
+  # ----- local infrastructure -----
+
+  infra:up:
+    desc: Start PostgreSQL and Redis and wait until both are healthy
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} up -d --wait --remove-orphans
+
+  infra:down:
+    desc: Stop local infrastructure including the observability stack (data volumes are kept)
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} --profile obs down
+
+  infra:logs:
+    desc: Tail local infrastructure logs
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} logs -f
+
+  infra:nuke:
+    desc: Stop local infrastructure AND delete data volumes
+    prompt: This deletes the local PostgreSQL data volume. Continue?
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} --profile obs down -v
+
+  obs:up:
+    desc: Start Prometheus + Tempo + Grafana (Grafana at http://localhost:53000)
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} --profile obs up -d --wait --remove-orphans
+
+  obs:down:
+    desc: Stop the observability stack only (PostgreSQL/Redis keep running)
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} --profile obs rm -sf prometheus tempo grafana
+
+  # ----- backend -----
+
+  backend:build:
+    desc: Compile every Go module
+    dir: backend
+    cmds:
+      - for: { var: GO_MODULES }
+        cmd: go -C {{.ITEM}} build ./...
+
+  backend:test:
+    desc: Run every Go test with the race detector
+    dir: backend
+    cmds:
+      - for: { var: GO_MODULES }
+        cmd: go -C {{.ITEM}} test -race ./...
+
+  backend:lint:
+    desc: Lint every Go module (same configuration as CI)
+    dir: backend
+    cmds:
+      - for: { var: GO_MODULES }
+        cmd: cd {{.ITEM}} && golangci-lint run
+
+  backend:fmt:
+    desc: Format every Go module (gofumpt + goimports via golangci-lint)
+    dir: backend
+    cmds:
+      - for: { var: GO_MODULES }
+        cmd: cd {{.ITEM}} && golangci-lint fmt
+
+  backend:tidy:
+    desc: go mod tidy every Go module
+    dir: backend
+    cmds:
+      - for: { var: GO_MODULES }
+        cmd: go -C {{.ITEM}} mod tidy
+
+  backend:vuln:
+    desc: Scan every Go module for known vulnerabilities (govulncheck, with allowlist)
+    cmds:
+      - bash scripts/govulncheck-gate.sh
+
+  executor:images:
+    desc: Build the three sandbox images the executor runs submissions in
+    cmds:
+      - docker build -t arena-sandbox-cpp:latest -f backend/services/executor/images/cpp.Dockerfile backend/services/executor/images
+      - docker build -t arena-sandbox-python:latest -f backend/services/executor/images/python.Dockerfile backend/services/executor/images
+      - docker build -t arena-sandbox-go:latest -f backend/services/executor/images/go.Dockerfile backend/services/executor/images
+
+  backend:test:integration:
+    desc: Run all integration tests (needs Docker; executor suite needs sandbox images)
+    dir: backend
+    env:
+      ARENA_SANDBOX_TESTS: "1"
+      ARENA_INFRA_TESTS: "1"
+    cmds:
+      - go -C services/executor test -race -count=1 -timeout 20m -run TestIntegration ./internal/service/
+      - go -C services/api-gateway test -race -count=1 -timeout 15m ./internal/integration/
+
+  db:seed:
+    desc: Seed the local database with a demo contest and demo users (alice/bob)
+    dotenv: ["{{.ROOT_DIR}}/.env"]
+    dir: backend/services/api-gateway
+    cmds:
+      - go run ./cmd/seed
+
+  # The run tasks load the root .env (created by `task env:init`). Tests do
+  # NOT load it — suites assert default-configuration behavior.
+  gateway:run:
+    desc: Run the api-gateway locally (loads .env)
+    dotenv: ["{{.ROOT_DIR}}/.env"]
+    dir: backend/services/api-gateway
+    cmds:
+      - go run ./cmd/server
+
+  executor:run:
+    desc: Run the executor locally (loads .env)
+    dotenv: ["{{.ROOT_DIR}}/.env"]
+    dir: backend/services/executor
+    cmds:
+      - go run ./cmd/server
+
+  # ----- kubernetes (Kind) -----
+
+  k8s:images:
+    desc: Build the gateway and executor service images
+    cmds:
+      - docker build -t arena-gateway:dev -f backend/services/api-gateway/Dockerfile backend/
+      - docker build -t arena-executor:dev -f backend/services/executor/Dockerfile backend/
+
+  k8s:up:
+    desc: Create the local Kind cluster (idempotent)
+    # Skipped when the cluster already exists (exporting its kubeconfig only
+    # succeeds then) — avoids shelling out to grep, which Windows lacks.
+    status:
+      - kind export kubeconfig --name arena
+    cmds:
+      - kind create cluster --config infra/k8s/kind-config.yaml
+
+  k8s:load:
+    desc: Load the service images into the Kind cluster
+    cmds:
+      - kind load docker-image arena-gateway:dev arena-executor:dev --name arena
+
+  k8s:deploy:
+    desc: Install/upgrade the arena Helm release (waits for rollout)
+    cmds:
+      - helm upgrade --install arena infra/helm/arena --wait --timeout 15m
+
+  k8s:smoke:
+    desc: End-to-end verdict check against the in-cluster stack (NodePort 8091)
+    cmds:
+      - bash scripts/k8s-smoke.sh
+
+  k8s:down:
+    desc: Delete the Kind cluster
+    cmds:
+      - kind delete cluster --name arena
+
+  helm:lint:
+    desc: Lint and template-render the Helm chart
+    cmds:
+      - helm lint infra/helm/arena
+      - helm template arena infra/helm/arena > {{.TMP_RENDER}}
+    vars:
+      TMP_RENDER: '{{if eq OS "windows"}}NUL{{else}}/dev/null{{end}}'
+
+  # ----- terraform -----
+
+  tf:init:
+    desc: Initialize the local Terraform module
+    dir: infra/terraform/local
+    cmds:
+      - terraform init
+
+  tf:apply:
+    desc: Provision the Kind cluster + Helm release via Terraform (builds images first)
+    deps: [k8s:images]
+    dir: infra/terraform/local
+    cmds:
+      - terraform apply -auto-approve
+
+  tf:destroy:
+    desc: Tear down the Terraform-managed cluster
+    dir: infra/terraform/local
+    cmds:
+      - terraform destroy -auto-approve
+
+  # ----- performance -----
+
+  backend:bench:
+    desc: Run Go micro-benchmarks (hot pure-logic paths)
+    dir: backend
+    cmds:
+      - go -C services/executor test -run '^$' -bench . -benchmem ./internal/judge/
+
+  loadtest:
+    desc: Run the k6 submission load test (needs k6 + a running stack)
+    cmds:
+      - k6 run loadtest/submit.js
+
+  # ----- protobuf contracts -----
+
+  proto:lint:
+    desc: Lint and format-check protobuf definitions
+    dir: backend/proto
+    cmds:
+      - buf lint
+      - buf format --diff --exit-code
+
+  proto:gen:
+    desc: Regenerate Go code from protobuf definitions into backend/pkg/pb
+    dir: backend/proto
+    cmds:
+      - buf generate
+
+  proto:breaking:
+    desc: Check protobuf contracts for breaking changes against main
+    dir: backend/proto
+    cmds:
+      - buf breaking --against "../../.git#branch=main,subdir=backend/proto"
+
+  # ----- frontend -----
+
+  frontend:dev:
+    desc: Run the frontend dev server (hot reload)
+    dir: frontend
+    cmds:
+      - pnpm dev
+
+  frontend:ci:
+    desc: Run every frontend check CI runs (lint, format, typecheck, test, build)
+    dir: frontend
+    cmds:
+      - pnpm install --frozen-lockfile
+      - pnpm lint
+      - pnpm format:check
+      - pnpm typecheck
+      - pnpm test
+      - pnpm build
+
+  # ----- aggregate -----
+
+  ci:
+    desc: Run every check CI runs, locally
+    cmds:
+      - task: proto:lint
+      - task: backend:lint
+      - task: backend:vuln
+      - task: backend:test
+      - task: backend:build
+      - task: frontend:ci
