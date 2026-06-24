@@ -22,7 +22,7 @@ jobs:
     name: Backend (lint, test, build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -50,7 +50,7 @@ jobs:
     name: Security (govulncheck, secret scan)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # gitleaks scans the full history
 
@@ -79,7 +79,7 @@ jobs:
     name: Image scan (Trivy, HIGH/CRITICAL fixable)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build service images
         run: |
@@ -112,7 +112,7 @@ jobs:
     name: Protobuf (lint, generated-code drift)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -142,7 +142,7 @@ jobs:
     name: Integration (sandbox + infra)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -164,7 +164,7 @@ jobs:
     name: Infra (helm lint, terraform validate)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Helm lint and render
         run: |
@@ -185,7 +185,7 @@ jobs:
     name: K8s smoke (judged submission inside Kind)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build service images
         run: |
@@ -219,7 +219,7 @@ jobs:
     name: E2E (full stack, Playwright)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -275,7 +275,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
