@@ -28,6 +28,7 @@ var (
 	ErrNotFound      = errors.New("db: not found")
 	ErrUsernameTaken = errors.New("db: username already taken")
 	ErrEmailTaken    = errors.New("db: email already registered")
+	ErrSlugTaken     = errors.New("db: contest slug already taken")
 )
 
 // Store provides repository access backed by a pgx connection pool.

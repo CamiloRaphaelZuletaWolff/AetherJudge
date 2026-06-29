@@ -82,7 +82,7 @@ export async function ensureFreshToken(): Promise<string | null> {
 }
 
 interface RequestOptions<T> {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH";
   body?: unknown;
   schema?: z.ZodType<T>;
   // auth attaches the bearer token and enables the 401→refresh→retry path.
@@ -93,16 +93,20 @@ export async function apiFetch<T = undefined>(
   path: string,
   { method = "GET", body, schema, auth = false }: RequestOptions<T> = {},
 ): Promise<T> {
+  // FormData bodies (file uploads) must NOT get a JSON Content-Type — the
+  // browser sets the multipart boundary itself — and must be sent as-is.
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+
   const doFetch = async (): Promise<Response> => {
     const headers: Record<string, string> = {};
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (body !== undefined && !isForm) headers["Content-Type"] = "application/json";
     if (auth && accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
     return fetch(`${API_URL}${path}`, {
       method,
       headers,
       credentials: "include",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
     });
   };
 

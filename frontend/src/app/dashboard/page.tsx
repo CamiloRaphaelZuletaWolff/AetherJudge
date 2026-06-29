@@ -1,12 +1,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
+import { motion } from "framer-motion";
 
 import { AuthGate } from "@/components/auth/auth-gate";
 import { ContestCard } from "@/components/dashboard/contest-card";
-import { Button, Card, ErrorNotice, Spinner } from "@/components/ui/ui";
+import { AppShell } from "@/components/shell/app-shell";
+import { Card, ErrorNotice } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
+import { staggerContainer } from "@/lib/motion";
 import { queryKeys } from "@/lib/query-keys";
 import { contestListSchema } from "@/lib/schemas";
 import { useAuthStore } from "@/stores/auth";
@@ -25,12 +28,14 @@ function ContestSection({ filter, title, empty }: (typeof sections)[number]) {
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">{title}</h2>
+      <h2 className="font-display text-lg font-semibold">{title}</h2>
 
       {query.isPending && (
-        <Card className="flex items-center justify-center py-10">
-          <Spinner />
-        </Card>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-44 w-full rounded-[calc(var(--radius)+2px)]" />
+          ))}
+        </div>
       )}
 
       {query.isError && (
@@ -39,13 +44,18 @@ function ContestSection({ filter, title, empty }: (typeof sections)[number]) {
 
       {query.isSuccess &&
         (query.data.contests.length === 0 ? (
-          <Card className="py-8 text-center text-sm text-zinc-500">{empty}</Card>
+          <Card className="py-10 text-center text-sm text-faint">{empty}</Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            animate="show"
+            className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+          >
             {query.data.contests.map((c) => (
               <ContestCard key={c.id} contest={c} />
             ))}
-          </div>
+          </motion.div>
         ))}
     </section>
   );
@@ -53,29 +63,28 @@ function ContestSection({ filter, title, empty }: (typeof sections)[number]) {
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
-  const signOut = useAuthStore((s) => s.signOut);
 
   return (
     <AuthGate>
-      <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 px-6 py-10">
-        <header className="flex items-center justify-between">
-          <Link href="/" className="text-2xl font-bold tracking-tight">
-            Arena
-          </Link>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-zinc-400" data-testid="current-user">
+      <AppShell>
+        <div className="mb-8">
+          <h1 className="font-display text-2xl font-semibold tracking-tight">
+            Welcome back,{" "}
+            <span data-testid="current-user" className="text-primary">
               {user?.username}
             </span>
-            <Button variant="ghost" onClick={() => void signOut()}>
-              Sign out
-            </Button>
-          </div>
-        </header>
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Pick a contest and start solving — verdicts and rankings update live.
+          </p>
+        </div>
 
-        {sections.map((s) => (
-          <ContestSection key={s.filter} {...s} />
-        ))}
-      </main>
+        <div className="flex flex-col gap-10">
+          {sections.map((s) => (
+            <ContestSection key={s.filter} {...s} />
+          ))}
+        </div>
+      </AppShell>
     </AuthGate>
   );
 }

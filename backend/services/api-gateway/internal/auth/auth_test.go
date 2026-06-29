@@ -52,7 +52,7 @@ func TestJWTRoundtrip(t *testing.T) {
 	userID := uuid.New()
 	now := time.Now()
 
-	token, err := issuer.Mint(userID, "alice", now)
+	token, err := issuer.Mint(userID, "alice", string(RoleAdmin), now)
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
@@ -63,6 +63,9 @@ func TestJWTRoundtrip(t *testing.T) {
 	}
 	if claims.Username != "alice" {
 		t.Errorf("Username = %q, want alice", claims.Username)
+	}
+	if claims.Role != string(RoleAdmin) {
+		t.Errorf("Role = %q, want %q", claims.Role, RoleAdmin)
 	}
 	got, err := claims.UserID()
 	if err != nil {
@@ -77,7 +80,7 @@ func TestJWTRejectsExpired(t *testing.T) {
 	t.Parallel()
 
 	issuer := NewTokenIssuer("test-secret", time.Minute)
-	token, err := issuer.Mint(uuid.New(), "alice", time.Now().Add(-time.Hour))
+	token, err := issuer.Mint(uuid.New(), "alice", string(RoleUser), time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
@@ -90,7 +93,7 @@ func TestJWTRejectsTamperedAndForeign(t *testing.T) {
 	t.Parallel()
 
 	issuer := NewTokenIssuer("test-secret", time.Minute)
-	token, err := issuer.Mint(uuid.New(), "alice", time.Now())
+	token, err := issuer.Mint(uuid.New(), "alice", string(RoleUser), time.Now())
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}

@@ -13,10 +13,15 @@ import (
 // callers must not leak the distinction to clients.
 var ErrInvalidToken = errors.New("auth: invalid token")
 
-// Claims is the access-token payload.
+// Claims is the access-token payload. Role is the cached RBAC role: Postgres is
+// the source of truth, but the role rides the token so authorization is a cheap
+// in-memory check per request. A role change therefore takes effect within one
+// access-token TTL (the refresh flow re-reads the role from the DB and
+// re-mints). See ADR-0014.
 type Claims struct {
 	jwt.RegisteredClaims
 	Username string `json:"username"`
+	Role     string `json:"role"`
 }
 
 // TokenIssuer mints and verifies HS256 access tokens.
@@ -30,8 +35,10 @@ func NewTokenIssuer(secret string, ttl time.Duration) *TokenIssuer {
 	return &TokenIssuer{secret: []byte(secret), ttl: ttl}
 }
 
-// Mint issues a signed access token for the user.
-func (t *TokenIssuer) Mint(userID uuid.UUID, username string, now time.Time) (string, error) {
+// Mint issues a signed access token for the user. role is the caller's RBAC
+// role at mint time (normalized via ParseRole so a bad value collapses to the
+// least privilege).
+func (t *TokenIssuer) Mint(userID uuid.UUID, username, role string, now time.Time) (string, error) {
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "arena",
@@ -40,6 +47,7 @@ func (t *TokenIssuer) Mint(userID uuid.UUID, username string, now time.Time) (st
 			ExpiresAt: jwt.NewNumericDate(now.Add(t.ttl)),
 		},
 		Username: username,
+		Role:     string(ParseRole(role)),
 	}
 
 	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(t.secret)

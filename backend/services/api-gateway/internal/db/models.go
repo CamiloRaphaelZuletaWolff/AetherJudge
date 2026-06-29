@@ -6,12 +6,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// User is an account row. PasswordHash never leaves the backend.
+// User is an account row. PasswordHash never leaves the backend. Role is the
+// RBAC privilege level ('user' | 'moderator' | 'admin'); see ADR-0014.
 type User struct {
 	ID           uuid.UUID
 	Username     string
 	Email        string
 	PasswordHash string
+	Role         string
 	CreatedAt    time.Time
 }
 

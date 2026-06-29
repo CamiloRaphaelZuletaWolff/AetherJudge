@@ -23,11 +23,18 @@ type userDTO struct {
 	ID        string    `json:"id"`
 	Username  string    `json:"username"`
 	Email     string    `json:"email"`
+	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 func toUserDTO(u db.User) userDTO {
-	return userDTO{ID: u.ID.String(), Username: u.Username, Email: u.Email, CreatedAt: u.CreatedAt}
+	return userDTO{
+		ID:        u.ID.String(),
+		Username:  u.Username,
+		Email:     u.Email,
+		Role:      string(auth.ParseRole(u.Role)),
+		CreatedAt: u.CreatedAt,
+	}
 }
 
 type authResponse struct {
@@ -126,7 +133,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 func (s *server) issueSession(w http.ResponseWriter, r *http.Request, user db.User, status int) {
 	now := time.Now()
 
-	access, err := s.tokens.Mint(user.ID, user.Username, now)
+	access, err := s.tokens.Mint(user.ID, user.Username, user.Role, now)
 	if err != nil {
 		s.log.Error("mint access token", "error", err)
 		respondError(w, s.log, http.StatusInternalServerError, "internal", "could not issue session")
@@ -163,6 +170,9 @@ func (s *server) refreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-read the user so the re-minted token reflects the CURRENT role: this
+	// is the propagation path for a role change (bounded by the access-token
+	// TTL). See ADR-0014.
 	user, err := s.store.GetUserByID(r.Context(), userID)
 	if err != nil {
 		s.log.Error("load user for refresh", "error", err)
@@ -170,7 +180,7 @@ func (s *server) refreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	access, err := s.tokens.Mint(user.ID, user.Username, now)
+	access, err := s.tokens.Mint(user.ID, user.Username, user.Role, now)
 	if err != nil {
 		s.log.Error("mint access token", "error", err)
 		respondError(w, s.log, http.StatusInternalServerError, "internal", "could not refresh session")

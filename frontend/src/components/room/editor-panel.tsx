@@ -1,11 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Play, Send } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 
 import { VerdictBadge } from "@/components/room/verdict-badge";
-import { Button, Card, ErrorNotice, Spinner } from "@/components/ui/ui";
+import { useTheme } from "@/components/theme/theme-provider";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { ErrorNotice } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/input";
 import { ApiError, apiFetch } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import {
@@ -28,17 +34,8 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ),
 });
 
-const monacoLanguage: Record<Language, string> = {
-  cpp: "cpp",
-  python: "python",
-  go: "go",
-};
-
-const languageLabels: Record<Language, string> = {
-  cpp: "C++",
-  python: "Python",
-  go: "Go",
-};
+const monacoLanguage: Record<Language, string> = { cpp: "cpp", python: "python", go: "go" };
+const languageLabels: Record<Language, string> = { cpp: "C++", python: "Python", go: "Go" };
 
 export function EditorPanel({
   contestId,
@@ -47,10 +44,10 @@ export function EditorPanel({
 }: {
   contestId: string;
   problemOrd: number;
-  // problemKey scopes drafts: unique per contest+problem.
   problemKey: string;
 }) {
   const queryClient = useQueryClient();
+  const { theme } = useTheme();
   const { language, setLanguage, getDraft, setDraft } = useEditorStore();
   const code = getDraft(problemKey, language);
 
@@ -84,19 +81,21 @@ export function EditorPanel({
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="flex items-center gap-2">
-        <select
-          value={language}
-          onChange={(e) => setLanguage(languageSchema.parse(e.target.value))}
-          data-testid="language-select"
-          className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm"
-          aria-label="Language"
-        >
-          {(Object.keys(languageLabels) as Language[]).map((l) => (
-            <option key={l} value={l}>
-              {languageLabels[l]}
-            </option>
-          ))}
-        </select>
+        <div className="relative">
+          <select
+            value={language}
+            onChange={(e) => setLanguage(languageSchema.parse(e.target.value))}
+            data-testid="language-select"
+            aria-label="Language"
+            className="cursor-pointer rounded-[var(--radius)] border border-border-strong bg-surface-2 px-3 py-1.5 text-sm font-medium text-foreground outline-none focus:border-primary"
+          >
+            {(Object.keys(languageLabels) as Language[]).map((l) => (
+              <option key={l} value={l}>
+                {languageLabels[l]}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="ml-auto flex gap-2">
           <Button
@@ -105,46 +104,47 @@ export function EditorPanel({
             onClick={() => run.mutate()}
             data-testid="run-button"
           >
-            Run code
+            {!run.isPending && <Play className="size-4" />} Run
           </Button>
           <Button
             loading={submit.isPending}
             onClick={() => submit.mutate()}
             data-testid="submit-button"
           >
-            Submit
+            {!submit.isPending && <Send className="size-4" />} Submit
           </Button>
         </div>
       </div>
 
-      <div className="min-h-[320px] flex-1 overflow-hidden rounded-lg border border-zinc-800">
+      <div className="min-h-[320px] flex-1 overflow-hidden rounded-[calc(var(--radius)+2px)] border border-border bg-surface">
         <MonacoEditor
           height="100%"
-          theme="vs-dark"
+          theme={theme === "dark" ? "vs-dark" : "light"}
           language={monacoLanguage[language]}
           value={code}
           onChange={(value) => setDraft(problemKey, language, value ?? "")}
           options={{
             minimap: { enabled: false },
             fontSize: 14,
+            fontFamily: "var(--font-jetbrains-mono), monospace",
             scrollBeyondLastLine: false,
             automaticLayout: true,
+            padding: { top: 12 },
             tabSize: 4,
           }}
         />
       </div>
 
       <Card className="flex flex-col gap-2 p-3">
-        <label htmlFor="custom-stdin" className="text-xs font-medium text-zinc-400">
+        <label htmlFor="custom-stdin" className="text-xs font-medium text-muted">
           Custom input (stdin) for Run
         </label>
-        <textarea
+        <Textarea
           id="custom-stdin"
           value={stdin}
           onChange={(e) => setStdin(e.target.value)}
           data-testid="stdin-input"
           rows={2}
-          className="resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm outline-none focus:border-emerald-600"
           placeholder="input piped to your program"
         />
       </Card>
@@ -159,7 +159,7 @@ export function EditorPanel({
         />
       )}
       {submit.isSuccess && (
-        <p className="text-sm text-zinc-400" data-testid="submit-confirmation">
+        <p className="text-sm text-muted" data-testid="submit-confirmation">
           Submitted — watch the verdict below.
         </p>
       )}
@@ -184,27 +184,27 @@ function RunOutput({ result }: { result: RunResponse }) {
 
   return (
     <Card className="flex flex-col gap-2 p-3" data-testid="run-output">
-      <p className="text-xs font-medium text-zinc-400">Run result: {statusLabel[result.status]}</p>
+      <p className="text-xs font-medium text-muted">Run result: {statusLabel[result.status]}</p>
       {result.compile_output && (
-        <pre className="overflow-x-auto rounded bg-zinc-900 p-2 font-mono text-xs text-sky-300">
+        <pre className="overflow-x-auto rounded-md bg-surface-2 p-2 font-mono text-xs text-v-ce">
           {result.compile_output}
         </pre>
       )}
       {result.stdout && (
         <pre
-          className="overflow-x-auto rounded bg-zinc-900 p-2 font-mono text-xs text-zinc-200"
+          className="overflow-x-auto rounded-md bg-surface-2 p-2 font-mono text-xs text-foreground"
           data-testid="run-stdout"
         >
           {result.stdout}
         </pre>
       )}
       {result.stderr && (
-        <pre className="overflow-x-auto rounded bg-zinc-900 p-2 font-mono text-xs text-orange-300">
+        <pre className="overflow-x-auto rounded-md bg-surface-2 p-2 font-mono text-xs text-v-re">
           {result.stderr}
         </pre>
       )}
       {!result.stdout && !result.stderr && !result.compile_output && (
-        <p className="text-xs text-zinc-600">(no output)</p>
+        <p className="text-xs text-faint">(no output)</p>
       )}
     </Card>
   );
@@ -236,17 +236,19 @@ function SubmissionsList({ contestId }: { contestId: string }) {
 
   const submissions = query.data.submissions;
   return (
-    <Card className="p-0" data-testid="my-submissions">
-      <h3 className="border-b border-zinc-800 px-4 py-3 text-sm font-semibold">My submissions</h3>
+    <Card className="overflow-hidden p-0" data-testid="my-submissions">
+      <h3 className="border-b border-border px-4 py-3 font-display text-sm font-semibold">
+        My submissions
+      </h3>
       {submissions.length === 0 ? (
-        <p className="px-4 py-5 text-center text-sm text-zinc-500">Nothing submitted yet.</p>
+        <p className="px-4 py-5 text-center text-sm text-faint">Nothing submitted yet.</p>
       ) : (
-        <ul className="divide-y divide-zinc-800/60">
+        <ul className="divide-y divide-border">
           {submissions.map((s) => (
             <li key={s.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-              <span className="font-mono text-xs text-zinc-500">P{s.problem_ord}</span>
-              <span className="text-zinc-400">{s.language}</span>
-              <span className="font-mono text-xs text-zinc-600">
+              <span className="font-mono text-xs text-faint">P{s.problem_ord}</span>
+              <span className="text-muted">{s.language}</span>
+              <span className="font-mono text-xs text-faint">
                 {new Date(s.submitted_at).toLocaleTimeString()}
               </span>
               <span className="ml-auto">

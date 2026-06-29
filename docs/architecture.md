@@ -3,8 +3,13 @@
 > Status: Phase 8 complete — all three tracks delivered (Track 1 MVP +
 > Track 2 Kubernetes/Helm/Terraform, observability, queue-based execution &
 > horizontal scaling + Track 3 security hardening, threat model, and
-> supply-chain gates). This document describes what exists today; the
-> [threat model](security/threat-model.md) covers the security posture.
+> supply-chain gates). Post-roadmap: a redesigned Next.js frontend,
+> **role-based access control** (`user`/`moderator`/`admin`, enforced
+> server-side — ADR-0014), and **in-app admin authoring** of contests,
+> problems, and test cases — including **bulk test-case upload** from
+> `.txt`/`.md`/`.csv`/`.json`/`.xlsx` files (ADR-0015, ADR-0016). This document describes what exists
+> today; the [threat model](security/threat-model.md) covers the security
+> posture.
 
 ## What Arena is
 

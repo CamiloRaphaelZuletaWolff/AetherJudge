@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/caezu/arena/backend/services/api-gateway/internal/auth"
 )
 
 // rateLimitRejected counts 429s by scope ("auth", "submit", "run") — the
@@ -23,10 +25,13 @@ type ctxKey int
 
 const userCtxKey ctxKey = iota
 
-// UserInfo identifies the authenticated caller.
+// UserInfo identifies the authenticated caller. Role is the RBAC role carried
+// in the access token (see ADR-0014); authorization checks read it via
+// requirePermission.
 type UserInfo struct {
 	ID       uuid.UUID
 	Username string
+	Role     auth.Role
 }
 
 // UserFrom extracts the authenticated user placed by requireAuth.
@@ -47,7 +52,7 @@ func (s *server) withCORS(next http.Handler) http.Handler {
 			h.Add("Vary", "Origin")
 
 			if r.Method == http.MethodOptions {
-				h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 				h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 				h.Set("Access-Control-Max-Age", "600")
 				w.WriteHeader(http.StatusNoContent)
@@ -107,8 +112,30 @@ func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), userCtxKey, UserInfo{ID: userID, Username: claims.Username})
+		ctx := context.WithValue(r.Context(), userCtxKey, UserInfo{
+			ID:       userID,
+			Username: claims.Username,
+			Role:     auth.ParseRole(claims.Role),
+		})
 		next(w, r.WithContext(ctx))
+	}
+}
+
+// requirePermission gates a handler on an RBAC permission. It must wrap
+// requireAuth (which places the user, with role, in context). This is the real
+// authorization boundary — the frontend's gating is only a UX convenience.
+func (s *server) requirePermission(perm auth.Permission, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := UserFrom(r.Context())
+		if !ok {
+			respondError(w, s.log, http.StatusUnauthorized, "unauthorized", "missing access token")
+			return
+		}
+		if !auth.Can(user.Role, perm) {
+			respondError(w, s.log, http.StatusForbidden, "forbidden", "you do not have permission to do that")
+			return
+		}
+		next(w, r)
 	}
 }
 

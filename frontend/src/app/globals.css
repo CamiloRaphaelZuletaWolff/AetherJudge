@@ -1,26 +1,184 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: the <html> element carries `.dark` (set by the
+   theme provider + the no-flash script in layout.tsx). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- Design tokens -------------------------------------------------------
+   Semantic CSS variables, themed per mode. Components reference the Tailwind
+   utilities generated from @theme below (bg-background, text-foreground, …),
+   so flipping `.dark` re-themes the whole app with no per-component work. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #ffffff;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --foreground: #0f172a;
+  --muted: #475569;
+  --faint: #94a3b8;
+  --primary: #16a34a;
+  --primary-hover: #15803d;
+  --primary-foreground: #ffffff;
+  --accent: #6366f1;
+  --accent-foreground: #ffffff;
+  --ring: #16a34a;
+  --danger: #dc2626;
+
+  /* verdict / status hues (foreground tints used with /15 backgrounds) */
+  --v-accepted: #16a34a;
+  --v-wrong: #dc2626;
+  --v-tle: #d97706;
+  --v-mle: #9333ea;
+  --v-re: #ea580c;
+  --v-ce: #0284c7;
+  --v-neutral: #64748b;
+}
+
+.dark {
+  /* True-black, hue-neutral scale (no blue/slate tint) — an OLED-style dark
+     theme: pure-black canvas with subtly lifted neutral-gray surfaces. */
+  --background: #000000;
+  --surface: #0a0a0a;
+  --surface-2: #161616;
+  --border: #262626;
+  --border-strong: #3f3f3f;
+  --foreground: #fafafa;
+  --muted: #a3a3a3;
+  --faint: #737373;
+  --primary: #22c55e;
+  --primary-hover: #16a34a;
+  --primary-foreground: #052e16;
+  /* Accent shifted off indigo (the old purple cast) to a clean teal. */
+  --accent: #2dd4bf;
+  --accent-foreground: #04211d;
+  --ring: #22c55e;
+  --danger: #f87171;
+
+  --v-accepted: #4ade80;
+  --v-wrong: #f87171;
+  --v-tle: #fbbf24;
+  --v-mle: #c084fc;
+  --v-re: #fb923c;
+  --v-ce: #38bdf8;
+  --v-neutral: #a3a3a3;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ring: var(--ring);
+  --color-danger: var(--danger);
+
+  --color-v-accepted: var(--v-accepted);
+  --color-v-wrong: var(--v-wrong);
+  --color-v-tle: var(--v-tle);
+  --color-v-mle: var(--v-mle);
+  --color-v-re: var(--v-re);
+  --color-v-ce: var(--v-ce);
+  --color-v-neutral: var(--v-neutral);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), var(--font-inter), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  --radius: 0.625rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--border);
+}
+
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Consistent, visible focus ring across all interactive elements. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Themed, slim scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Subtle ambient grid used by the landing/auth backgrounds. */
+.bg-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--border) 60%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--border) 60%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 48px 48px;
+}
+
+/* Reusable keyframes (the WS "pulse" ping + verdict shimmer). */
+@keyframes arena-ping {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.animate-arena-ping {
+  animation: arena-ping 1.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* Honor the OS-level motion preference everywhere as a safety net; per
+   component we also gate Framer Motion via MotionConfig reducedMotion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

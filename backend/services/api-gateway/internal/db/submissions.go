@@ -88,6 +88,49 @@ func (s *Store) ListPendingSubmissionIDs(ctx context.Context) ([]uuid.UUID, erro
 	return out, nil
 }
 
+// ContestSubmission is a submission enriched with its author's username and
+// problem ordinal — the moderator "all submissions" read (RBAC
+// submission.viewAll; see ADR-0014).
+type ContestSubmission struct {
+	Submission
+	Username   string
+	ProblemOrd int
+}
+
+// ListContestSubmissions returns every submission in a contest, newest first,
+// joined with the author's username and the problem ordinal. For moderators and
+// admins only — enforced server-side by requirePermission.
+func (s *Store) ListContestSubmissions(ctx context.Context, contestID uuid.UUID, limit int) ([]ContestSubmission, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT s.id, s.user_id, s.problem_id, s.contest_id, s.language, s.code, s.status,
+		        s.verdict, s.time_used_ms, s.submitted_at, s.judged_at, u.username, p.ord
+		 FROM submissions s
+		 JOIN users u ON u.id = s.user_id
+		 JOIN problems p ON p.id = s.problem_id
+		 WHERE s.contest_id = $1
+		 ORDER BY s.submitted_at DESC LIMIT $2`,
+		contestID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("db: list contest submissions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ContestSubmission
+	for rows.Next() {
+		var cs ContestSubmission
+		if err := rows.Scan(&cs.ID, &cs.UserID, &cs.ProblemID, &cs.ContestID, &cs.Language, &cs.Code,
+			&cs.Status, &cs.Verdict, &cs.TimeUsedMs, &cs.SubmittedAt, &cs.JudgedAt,
+			&cs.Username, &cs.ProblemOrd); err != nil {
+			return nil, fmt.Errorf("db: scan contest submission: %w", err)
+		}
+		out = append(out, cs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: contest submissions rows: %w", err)
+	}
+	return out, nil
+}
+
 // ListUserContestSubmissions returns a user's submissions in a contest,
 // newest first.
 func (s *Store) ListUserContestSubmissions(ctx context.Context, contestID, userID uuid.UUID, limit int) ([]Submission, error) {

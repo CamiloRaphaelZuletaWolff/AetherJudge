@@ -91,6 +91,36 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/run",
 		s.requireAuth(s.rateLimited("run", s.cfg.RunRatePerMin, byUser, s.runCode)))
 
+	// Admin / moderator surface. Every route is requireAuth + requirePermission
+	// — the real authorization boundary (the frontend's gating is UX only;
+	// ADR-0014).
+	mux.HandleFunc("GET /api/v1/admin/users",
+		s.requireAuth(s.requirePermission(auth.PermUserManage, s.listUsers)))
+	mux.HandleFunc("PATCH /api/v1/admin/users/{id}/role",
+		s.requireAuth(s.requirePermission(auth.PermUserManage, s.changeUserRole)))
+	mux.HandleFunc("GET /api/v1/admin/contests/{id}/submissions",
+		s.requireAuth(s.requirePermission(auth.PermSubmissionViewAll, s.listContestSubmissions)))
+
+	// Content authoring (ADR-0015): create/edit contests, add problems and
+	// hidden test cases. contest.create/contest.edit/problem.manage.
+	mux.HandleFunc("POST /api/v1/admin/contests",
+		s.requireAuth(s.requirePermission(auth.PermContestCreate, s.createContest)))
+	mux.HandleFunc("PATCH /api/v1/admin/contests/{id}",
+		s.requireAuth(s.requirePermission(auth.PermContestEdit, s.updateContest)))
+	mux.HandleFunc("GET /api/v1/admin/contests/{id}/problems",
+		s.requireAuth(s.requirePermission(auth.PermProblemManage, s.listAdminProblems)))
+	mux.HandleFunc("POST /api/v1/admin/contests/{id}/problems",
+		s.requireAuth(s.requirePermission(auth.PermProblemManage, s.createProblem)))
+	mux.HandleFunc("GET /api/v1/admin/problems/{problemId}/test-cases",
+		s.requireAuth(s.requirePermission(auth.PermProblemManage, s.listTestCases)))
+	mux.HandleFunc("POST /api/v1/admin/problems/{problemId}/test-cases",
+		s.requireAuth(s.requirePermission(auth.PermProblemManage, s.createTestCases)))
+	// Parse an uploaded file (.txt/.md/.csv/.json/.xlsx) into test cases without
+	// writing — the client previews then commits via the batch endpoint above
+	// (ADR-0016).
+	mux.HandleFunc("POST /api/v1/admin/test-cases/parse",
+		s.requireAuth(s.requirePermission(auth.PermProblemManage, s.parseTestCasesUpload)))
+
 	// Live room channel.
 	mux.HandleFunc("GET /api/v1/ws/contests/{id}", s.requireAuth(s.serveContestWS))
 
