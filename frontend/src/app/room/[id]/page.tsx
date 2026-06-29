@@ -1,15 +1,22 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AuthGate } from "@/components/auth/auth-gate";
+import { Can } from "@/components/auth/can";
+import { AllSubmissionsPanel } from "@/components/room/all-submissions-panel";
 import { EditorPanel } from "@/components/room/editor-panel";
 import { LeaderboardPanel } from "@/components/room/leaderboard-panel";
 import { ProblemPanel } from "@/components/room/problem-panel";
-import { Badge, ErrorNotice, Spinner } from "@/components/ui/ui";
+import { UserMenu } from "@/components/shell/user-menu";
+import { Badge } from "@/components/ui/badge";
+import { ErrorNotice } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useContestEvents } from "@/hooks/use-contest-events";
 import { apiFetch } from "@/lib/api";
 import { contestPhase, formatCountdown } from "@/lib/format";
@@ -62,29 +69,38 @@ function Room({ contestId }: { contestId: string }) {
   const { contest, problems } = detail.data;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-screen-2xl flex-col gap-4 px-4 py-4 lg:px-6">
-      <header className="flex flex-wrap items-center gap-3">
-        <Link href="/dashboard" className="text-sm text-zinc-400 hover:text-zinc-200">
-          ← Dashboard
-        </Link>
-        <h1 className="text-lg font-semibold" data-testid="contest-title">
-          {contest.title}
-        </h1>
-        <ContestClock startsAt={contest.starts_at} endsAt={contest.ends_at} />
-        <span className="ml-auto">
-          {connected ? (
-            <Badge tone="green" data-testid="ws-status">
-              live
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
+        <div className="mx-auto flex h-14 w-full max-w-screen-2xl items-center gap-3 px-4 lg:px-6">
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-1 text-sm text-muted transition-colors hover:text-foreground"
+          >
+            <ChevronLeft className="size-4" /> <span className="hidden sm:inline">Dashboard</span>
+          </Link>
+          <span className="h-5 w-px bg-border" />
+          <h1 className="truncate font-display font-semibold" data-testid="contest-title">
+            {contest.title}
+          </h1>
+          <ContestClock startsAt={contest.starts_at} endsAt={contest.ends_at} />
+          <div className="ml-auto flex items-center gap-2">
+            <Badge
+              variant={connected ? "success" : "warning"}
+              data-testid="ws-status"
+              className={connected ? "animate-arena-ping" : undefined}
+            >
+              <span
+                className={`size-1.5 rounded-full ${connected ? "bg-v-accepted" : "bg-v-tle"}`}
+              />
+              {connected ? "Live" : "Reconnecting…"}
             </Badge>
-          ) : (
-            <Badge tone="amber" data-testid="ws-status">
-              reconnecting…
-            </Badge>
-          )}
-        </span>
+            <ThemeToggle />
+            <UserMenu />
+          </div>
+        </div>
       </header>
 
-      <div className="grid flex-1 gap-4 lg:grid-cols-2">
+      <main className="mx-auto grid w-full max-w-screen-2xl gap-4 px-4 py-4 lg:grid-cols-2 lg:px-6">
         <div className="flex flex-col gap-4">
           <ProblemPanel
             contestId={contestId}
@@ -100,8 +116,16 @@ function Room({ contestId }: { contestId: string }) {
           problemOrd={selectedOrd}
           problemKey={`${contestId}:${selectedOrd}`}
         />
-      </div>
-    </main>
+      </main>
+
+      {/* Moderators and admins see everyone's submissions; plain users never
+          render this (and the endpoint 403s them regardless). */}
+      <Can perm="submission.viewAll">
+        <section className="mx-auto w-full max-w-screen-2xl px-4 pb-6 lg:px-6">
+          <AllSubmissionsPanel contestId={contestId} />
+        </section>
+      </Can>
+    </div>
   );
 }
 
@@ -115,17 +139,21 @@ function ContestClock({ startsAt, endsAt }: { startsAt: string; endsAt: string }
   const phase = contestPhase(startsAt, endsAt, now);
   if (phase === "active") {
     return (
-      <Badge tone="zinc" className="font-mono">
+      <Badge variant="neutral" className="hidden font-mono sm:inline-flex">
         ends in {formatCountdown(Date.parse(endsAt) - now)}
       </Badge>
     );
   }
   if (phase === "upcoming") {
     return (
-      <Badge tone="sky" className="font-mono">
+      <Badge variant="info" className="hidden font-mono sm:inline-flex">
         starts in {formatCountdown(Date.parse(startsAt) - now)}
       </Badge>
     );
   }
-  return <Badge tone="zinc">finished</Badge>;
+  return (
+    <Badge variant="neutral" className="hidden sm:inline-flex">
+      finished
+    </Badge>
+  );
 }

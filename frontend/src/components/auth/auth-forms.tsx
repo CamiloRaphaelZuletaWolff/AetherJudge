@@ -2,17 +2,19 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
+import { AlertCircle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Button, Field } from "@/components/ui/ui";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/input";
 import { ApiError, apiFetch } from "@/lib/api";
 import { authResponseSchema, type AuthResponse } from "@/lib/schemas";
 import { useAuthStore } from "@/stores/auth";
 
-// Validation mirrors the backend's rules (internal/api/validate.go) so
-// users see errors before the round-trip; the server remains authoritative.
+// Validation mirrors the backend's rules (internal/api/validate.go) so users
+// see errors before the round-trip; the server remains authoritative.
 const signupSchema = z.object({
   username: z
     .string()
@@ -40,17 +42,25 @@ function useOnSignedIn() {
   };
 }
 
+function FormError({ message, testid }: { message: string; testid?: string }) {
+  return (
+    <p
+      data-testid={testid}
+      className="flex items-center gap-2 rounded-[var(--radius)] border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger"
+    >
+      <AlertCircle className="size-4 shrink-0" />
+      {message}
+    </p>
+  );
+}
+
 export function SignupForm() {
   const onSignedIn = useOnSignedIn();
   const form = useForm<SignupValues>({ resolver: zodResolver(signupSchema) });
 
   const mutation = useMutation({
     mutationFn: (values: SignupValues) =>
-      apiFetch("/api/v1/auth/signup", {
-        method: "POST",
-        body: values,
-        schema: authResponseSchema,
-      }),
+      apiFetch("/api/v1/auth/signup", { method: "POST", body: values, schema: authResponseSchema }),
     onSuccess: onSignedIn,
     onError: (error) => {
       if (error instanceof ApiError && error.code === "username_taken") {
@@ -89,10 +99,8 @@ export function SignupForm() {
         error={form.formState.errors.password?.message}
         {...form.register("password")}
       />
-      {form.formState.errors.root && (
-        <p className="text-sm text-red-400">{form.formState.errors.root.message}</p>
-      )}
-      <Button type="submit" loading={mutation.isPending} data-testid="signup-submit">
+      {form.formState.errors.root && <FormError message={form.formState.errors.root.message!} />}
+      <Button type="submit" size="lg" loading={mutation.isPending} data-testid="signup-submit">
         Create account
       </Button>
     </form>
@@ -105,11 +113,7 @@ export function LoginForm() {
 
   const mutation = useMutation({
     mutationFn: (values: LoginValues) =>
-      apiFetch("/api/v1/auth/login", {
-        method: "POST",
-        body: values,
-        schema: authResponseSchema,
-      }),
+      apiFetch("/api/v1/auth/login", { method: "POST", body: values, schema: authResponseSchema }),
     onSuccess: onSignedIn,
     onError: (error) => {
       form.setError("root", {
@@ -138,11 +142,9 @@ export function LoginForm() {
         {...form.register("password")}
       />
       {form.formState.errors.root && (
-        <p className="text-sm text-red-400" data-testid="login-error">
-          {form.formState.errors.root.message}
-        </p>
+        <FormError message={form.formState.errors.root.message!} testid="login-error" />
       )}
-      <Button type="submit" loading={mutation.isPending} data-testid="login-submit">
+      <Button type="submit" size="lg" loading={mutation.isPending} data-testid="login-submit">
         Sign in
       </Button>
     </form>

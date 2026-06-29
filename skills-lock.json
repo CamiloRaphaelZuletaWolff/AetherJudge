@@ -6,6 +6,12 @@
       "sourceType": "github",
       "skillPath": "skills/.curated/render-deploy/SKILL.md",
       "computedHash": "5ccf3f9d94511258cc568484b8ebee170e8dbec4a74428acae948fe6021ff8d8"
+    },
+    "ui-animation": {
+      "source": "mblode/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/ui-animation/SKILL.md",
+      "computedHash": "cc6bab40aa4ce1b8ade52ab51df83d254e653f6a6b2dbcb703dfbe1804d29041"
     }
   }
 }

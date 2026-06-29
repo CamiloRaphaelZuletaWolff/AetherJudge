@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 
-import { Button } from "@/components/ui/ui";
+import { Button } from "@/components/ui/button";
 
 export default function RoomError({
   error,
@@ -17,9 +17,9 @@ export default function RoomError({
   }, [error]);
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6">
-      <h1 className="text-xl font-semibold">The room hit an error</h1>
-      <p className="max-w-md text-center text-sm text-zinc-400">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+      <h1 className="font-display text-xl font-semibold">The room hit an error</h1>
+      <p className="max-w-md text-sm text-muted">
         Your code drafts are safe (they persist locally). Try reloading the room.
       </p>
       <div className="flex gap-3">

@@ -97,6 +97,42 @@ func (s *Store) CreateContest(ctx context.Context, slug, title, description stri
 	return c, nil
 }
 
+// InsertContest creates a contest with create (not upsert) semantics: a
+// duplicate slug returns ErrSlugTaken so the admin handler can answer 409.
+// (CreateContest above upserts and is reserved for idempotent seeding.)
+func (s *Store) InsertContest(ctx context.Context, slug, title, description string, startsAt, endsAt time.Time) (Contest, error) {
+	c, err := scanContest(s.pool.QueryRow(ctx,
+		`INSERT INTO contests (slug, title, description, starts_at, ends_at)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING `+contestColumns,
+		slug, title, description, startsAt, endsAt))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return Contest{}, ErrSlugTaken
+		}
+		return Contest{}, fmt.Errorf("db: insert contest: %w", err)
+	}
+	return c, nil
+}
+
+// UpdateContest edits a contest's title, description, and schedule, returning
+// the updated row or ErrNotFound.
+func (s *Store) UpdateContest(ctx context.Context, id uuid.UUID, title, description string, startsAt, endsAt time.Time) (Contest, error) {
+	c, err := scanContest(s.pool.QueryRow(ctx,
+		`UPDATE contests SET title = $2, description = $3, starts_at = $4, ends_at = $5
+		 WHERE id = $1
+		 RETURNING `+contestColumns,
+		id, title, description, startsAt, endsAt))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Contest{}, ErrNotFound
+	}
+	if err != nil {
+		return Contest{}, fmt.Errorf("db: update contest: %w", err)
+	}
+	return c, nil
+}
+
 // JoinContest registers a participant; joining twice is a no-op. A missing
 // contest or user maps to ErrNotFound.
 func (s *Store) JoinContest(ctx context.Context, contestID, userID uuid.UUID) error {
@@ -136,6 +172,84 @@ func (s *Store) ListProblems(ctx context.Context, contestID uuid.UUID) ([]Proble
 		return nil, fmt.Errorf("db: list problems rows: %w", err)
 	}
 	return out, nil
+}
+
+// ProblemWithCount is a problem plus how many test cases it has — the admin
+// builder's progress display.
+type ProblemWithCount struct {
+	Problem
+	TestCaseCount int
+}
+
+// ListProblemsWithCounts returns a contest's problems with their test-case
+// counts, ordered by ord (admin authoring view).
+func (s *Store) ListProblemsWithCounts(ctx context.Context, contestID uuid.UUID) ([]ProblemWithCount, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT p.id, p.contest_id, p.ord, p.title, p.statement_md, p.time_limit_ms,
+		        p.memory_limit_mb, count(tc.id)
+		 FROM problems p
+		 LEFT JOIN test_cases tc ON tc.problem_id = p.id
+		 WHERE p.contest_id = $1
+		 GROUP BY p.id
+		 ORDER BY p.ord`, contestID)
+	if err != nil {
+		return nil, fmt.Errorf("db: list problems with counts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ProblemWithCount
+	for rows.Next() {
+		var p ProblemWithCount
+		if err := rows.Scan(&p.ID, &p.ContestID, &p.Ord, &p.Title, &p.StatementMD,
+			&p.TimeLimitMs, &p.MemoryLimitMB, &p.TestCaseCount); err != nil {
+			return nil, fmt.Errorf("db: scan problem with count: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: problems with counts rows: %w", err)
+	}
+	return out, nil
+}
+
+// GetProblemByID fetches a problem by its UUID, or ErrNotFound — used to scope
+// the admin test-case endpoints to a real problem.
+func (s *Store) GetProblemByID(ctx context.Context, id uuid.UUID) (Problem, error) {
+	var p Problem
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, contest_id, ord, title, statement_md, time_limit_ms, memory_limit_mb
+		 FROM problems WHERE id = $1`, id).
+		Scan(&p.ID, &p.ContestID, &p.Ord, &p.Title, &p.StatementMD, &p.TimeLimitMs, &p.MemoryLimitMB)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Problem{}, ErrNotFound
+	}
+	if err != nil {
+		return Problem{}, fmt.Errorf("db: get problem by id: %w", err)
+	}
+	return p, nil
+}
+
+// NextProblemOrd returns the next free ordinal for a contest's problems, so a
+// freshly-added problem never collides with an existing one.
+func (s *Store) NextProblemOrd(ctx context.Context, contestID uuid.UUID) (int, error) {
+	var ord int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(ord), 0) + 1 FROM problems WHERE contest_id = $1`, contestID).
+		Scan(&ord); err != nil {
+		return 0, fmt.Errorf("db: next problem ord: %w", err)
+	}
+	return ord, nil
+}
+
+// NextTestCaseOrd returns the next free ordinal for a problem's test cases.
+func (s *Store) NextTestCaseOrd(ctx context.Context, problemID uuid.UUID) (int, error) {
+	var ord int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(ord), 0) + 1 FROM test_cases WHERE problem_id = $1`, problemID).
+		Scan(&ord); err != nil {
+		return 0, fmt.Errorf("db: next test case ord: %w", err)
+	}
+	return ord, nil
 }
 
 // GetProblemByOrd fetches a problem by its position within a contest.

@@ -10,11 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const userColumns = "id, username, email, password_hash, created_at"
+const userColumns = "id, username, email, password_hash, role, created_at"
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt)
 	return u, err
 }
 
@@ -66,6 +66,45 @@ func (s *Store) GetUserByLogin(ctx context.Context, login string) (User, error) 
 	}
 	if err != nil {
 		return User{}, fmt.Errorf("db: get user by login: %w", err)
+	}
+	return u, nil
+}
+
+// ListUsers returns every account oldest-first — the admin user-management
+// read (RBAC user.manage; see ADR-0014). The user table is small at this
+// scale, so no pagination.
+func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("db: list users: %w", err)
+	}
+	defer rows.Close()
+
+	var out []User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("db: scan user: %w", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: list users rows: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateUserRole sets a user's RBAC role and returns the updated row, or
+// ErrNotFound if no such user. Callers validate the role string first
+// (auth.IsValidRole); the column CHECK is the final backstop.
+func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) (User, error) {
+	u, err := scanUser(s.pool.QueryRow(ctx,
+		`UPDATE users SET role = $2 WHERE id = $1 RETURNING `+userColumns, id, role))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("db: update user role: %w", err)
 	}
 	return u, nil
 }

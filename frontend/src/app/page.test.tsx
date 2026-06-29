@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import Home from "./page";
 
 describe("Home", () => {
-  it("renders the Arena heading", () => {
+  it("renders the Aether Judge heading", () => {
     render(<Home />);
 
-    expect(screen.getByRole("heading", { level: 1, name: "Arena" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Aether Judge" })).toBeInTheDocument();
   });
 
   it("describes the three product pillars", () => {

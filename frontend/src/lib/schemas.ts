@@ -7,11 +7,20 @@ import { z } from "zod";
 export const languageSchema = z.enum(["cpp", "python", "go"]);
 export type Language = z.infer<typeof languageSchema>;
 
+// Roles are the wire contract for the future RBAC backend. Until the API sends
+// a role, userSchema below defaults everyone to "user", so the whole RBAC layer
+// is dormant-but-ready. (Authorization rules live in lib/rbac.ts.)
+export const ROLES = ["user", "moderator", "admin"] as const;
+export const roleSchema = z.enum(ROLES).catch("user");
+export type Role = z.infer<typeof roleSchema>;
+
 export const userSchema = z.object({
   id: z.string().uuid(),
   username: z.string(),
   email: z.string(),
   created_at: z.string(),
+  // Optional today (backend omits it); defaulted so the UI can rely on it.
+  role: roleSchema.optional().default("user"),
 });
 export type User = z.infer<typeof userSchema>;
 
@@ -110,6 +119,83 @@ export const submissionListSchema = z.object({
     .array(submissionSchema)
     .nullable()
     .transform((v) => v ?? []),
+});
+
+// --- Admin / RBAC payloads (ADR-0014) --------------------------------------
+// These back the admin-only and moderator-only views. The endpoints behind
+// them are enforced server-side; the UI gating is convenience only.
+
+export const adminUserSchema = z.object({
+  id: z.string().uuid(),
+  username: z.string(),
+  email: z.string(),
+  role: roleSchema,
+  created_at: z.string(),
+});
+export type AdminUser = z.infer<typeof adminUserSchema>;
+
+export const adminUserListSchema = z.object({
+  users: z
+    .array(adminUserSchema)
+    .nullable()
+    .transform((v) => v ?? []),
+});
+
+// A submission enriched with its author's username — the moderator
+// "all submissions" view (submission.viewAll).
+export const adminSubmissionSchema = submissionSchema.extend({ username: z.string() });
+export type AdminSubmission = z.infer<typeof adminSubmissionSchema>;
+
+export const adminSubmissionListSchema = z.object({
+  submissions: z
+    .array(adminSubmissionSchema)
+    .nullable()
+    .transform((v) => v ?? []),
+});
+
+// Content authoring (ADR-0015): admin views of problems (with test-case counts)
+// and the test cases themselves.
+export const adminProblemSchema = z.object({
+  id: z.string().uuid(),
+  ord: z.number().int(),
+  title: z.string(),
+  statement_md: z.string().optional().default(""),
+  time_limit_ms: z.number().int(),
+  memory_limit_mb: z.number().int(),
+  test_case_count: z.number().int(),
+});
+export type AdminProblem = z.infer<typeof adminProblemSchema>;
+
+export const adminProblemListSchema = z.object({
+  problems: z
+    .array(adminProblemSchema)
+    .nullable()
+    .transform((v) => v ?? []),
+});
+
+export const testCaseSchema = z.object({
+  id: z.string().uuid().optional(),
+  ord: z.number().int(),
+  stdin: z.string(),
+  expected_output: z.string(),
+});
+export type TestCase = z.infer<typeof testCaseSchema>;
+
+export const testCaseListSchema = z.object({
+  test_cases: z
+    .array(testCaseSchema)
+    .nullable()
+    .transform((v) => v ?? []),
+});
+
+// Response of the upload-parse endpoint (ADR-0016): cases parsed from a file,
+// not yet persisted.
+export const parsedTestCasesSchema = z.object({
+  cases: z
+    .array(testCaseSchema)
+    .nullable()
+    .transform((v) => v ?? []),
+  count: z.number().int(),
 });
 
 export const runResponseSchema = z.object({

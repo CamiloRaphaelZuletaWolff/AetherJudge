@@ -1,10 +1,14 @@
 "use client";
 
+import { motion } from "framer-motion";
+import { ArrowRight, CalendarClock, Clock, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { Badge, Button, Card } from "@/components/ui/ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { contestPhase, formatCountdown } from "@/lib/format";
+import { fadeInUp, spring } from "@/lib/motion";
 import type { Contest } from "@/lib/schemas";
 
 export function ContestCard({ contest }: { contest: Contest }) {
@@ -18,31 +22,53 @@ export function ContestCard({ contest }: { contest: Contest }) {
   }, []);
 
   return (
-    <Card className="flex flex-col gap-3" data-testid="contest-card">
+    <motion.div
+      variants={fadeInUp}
+      whileHover={{ y: -4 }}
+      transition={spring}
+      data-testid="contest-card"
+      className="group flex flex-col gap-3 rounded-[calc(var(--radius)+2px)] border border-border bg-surface p-5 shadow-sm transition-colors hover:border-primary/40"
+    >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="font-semibold">{contest.title}</h3>
-        {phase === "active" && <Badge tone="green">live</Badge>}
-        {phase === "upcoming" && <Badge tone="sky">upcoming</Badge>}
-        {phase === "past" && <Badge tone="zinc">finished</Badge>}
+        <h3 className="font-display font-semibold leading-tight">{contest.title}</h3>
+        {phase === "active" && (
+          <Badge variant="success">
+            <span className="size-1.5 animate-pulse rounded-full bg-v-accepted" /> Live
+          </Badge>
+        )}
+        {phase === "upcoming" && <Badge variant="info">Upcoming</Badge>}
+        {phase === "past" && <Badge variant="neutral">Finished</Badge>}
       </div>
 
       {contest.description && (
-        <p className="line-clamp-2 text-sm text-zinc-400">{contest.description}</p>
+        <p className="line-clamp-2 text-sm text-muted">{contest.description}</p>
       )}
 
-      <p className="font-mono text-xs text-zinc-500">
-        {phase === "active" && <>ends in {formatCountdown(Date.parse(contest.ends_at) - now)}</>}
-        {phase === "upcoming" && (
-          <>starts in {formatCountdown(Date.parse(contest.starts_at) - now)}</>
+      <p className="flex items-center gap-1.5 font-mono text-xs text-faint">
+        {phase === "active" && (
+          <>
+            <Clock className="size-3.5" /> ends in{" "}
+            {formatCountdown(Date.parse(contest.ends_at) - now)}
+          </>
         )}
-        {phase === "past" && <>ended {new Date(contest.ends_at).toLocaleString()}</>}
+        {phase === "upcoming" && (
+          <>
+            <CalendarClock className="size-3.5" /> starts in{" "}
+            {formatCountdown(Date.parse(contest.starts_at) - now)}
+          </>
+        )}
+        {phase === "past" && (
+          <>
+            <Trophy className="size-3.5" /> ended {new Date(contest.ends_at).toLocaleDateString()}
+          </>
+        )}
       </p>
 
-      <div className="mt-auto">
+      <div className="mt-auto pt-1">
         {phase === "active" && (
           <Link href={`/room/${contest.id}`}>
             <Button className="w-full" data-testid="enter-room">
-              Enter room
+              Enter room <ArrowRight className="size-4" />
             </Button>
           </Link>
         )}
@@ -59,6 +85,6 @@ export function ContestCard({ contest }: { contest: Contest }) {
           </Link>
         )}
       </div>
-    </Card>
+    </motion.div>
   );
 }

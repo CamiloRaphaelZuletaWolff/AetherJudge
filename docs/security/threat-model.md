@@ -100,7 +100,16 @@ hostile-by-default production deployment.
 rotated on every use, stored **hashed**, and a detected reuse revokes the whole
 token family (ADR-0007). The refresh token rides an `HttpOnly`, `Secure`
 (production) cookie with `SameSite=None` in production / `Lax` in dev. Every
-mutating and private route is behind `requireAuth`.
+mutating and private route is behind `requireAuth`. **Authorization is
+role-based** (ADR-0014): `user` < `moderator` < `admin`, with named permissions
+checked **server-side** by `requirePermission` on every `/api/v1/admin/*` route
+(403 on failure) — the frontend's role gating is UX only and never the boundary.
+Roles live in Postgres (source of truth) and are cached in the JWT, so a role
+change propagates within one access-token TTL (≤15 min) via the re-minting
+refresh flow; an unknown/invalid role string collapses to the least privilege
+(`user`). Privilege-escalation residual: a demoted admin keeps their existing
+access token until it expires — revoking their refresh-token family ends the
+session at the next refresh.
 
 **Tampering / Information disclosure (transport & CORS).** TLS is terminated at
 the edge (Render/ingress). CORS is an **exact-match allow-list of a single
@@ -172,7 +181,15 @@ idempotent, so at-least-once queue redelivery cannot double-score.
 ## Supply chain
 
 - Go module checksums (`go.sum`) and a pinned tool set; `govulncheck` runs in CI
-  against the known-vulnerability database.
+  against the known-vulnerability database via `scripts/govulncheck-gate.sh`,
+  which fails on any advisory affecting **called** code except a small, assessed
+  allowlist with no upstream fix that Arena never reaches. Currently accepted:
+  Moby (`github.com/docker/docker`) advisories **GO-2026-4887/4883** (daemon
+  AuthZ/plugin paths — unused) and the **GO-2026-5746/5668/5617** `docker cp`
+  /archive family (`Fixed in: N/A`) — Arena's executor pipeline is **exec-driven
+  (no `docker cp`, no mounts; ADR-0006)**, so the affected copy/archive code is
+  never exercised, and the executor's Docker daemon is already the one
+  privileged, documented trust boundary (ADR-0009).
 - Frontend dependencies are pinned via `pnpm-lock.yaml`; native build scripts
   are explicitly allow-listed; `pnpm audit` runs in CI.
 - Built container images are scanned with **Trivy**; Dependabot keeps Go

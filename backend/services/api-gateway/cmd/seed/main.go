@@ -55,20 +55,42 @@ func run() error {
 	defer pool.Close()
 	store := db.New(pool)
 
-	for _, username := range []string{"alice", "bob"} {
+	// One account per RBAC tier so every permission path can be exercised by
+	// hand (ADR-0014): alice=admin, carol=moderator, bob=user.
+	demoUsers := []struct {
+		username string
+		role     string
+	}{
+		{"alice", string(auth.RoleAdmin)},
+		{"bob", string(auth.RoleUser)},
+		{"carol", string(auth.RoleModerator)},
+	}
+	for _, du := range demoUsers {
 		hash, err := auth.HashPassword(demoPassword)
 		if err != nil {
 			return fmt.Errorf("hash demo password: %w", err)
 		}
-		_, err = store.CreateUser(ctx, username, username+"@example.com", hash)
+		user, err := store.CreateUser(ctx, du.username, du.username+"@example.com", hash)
 		switch {
 		case errors.Is(err, db.ErrUsernameTaken), errors.Is(err, db.ErrEmailTaken):
-			log.Info("demo user already exists", "username", username)
+			// Already exists — fetch it so the role can be (re)assigned idempotently.
+			user, err = store.GetUserByLogin(ctx, du.username)
+			if err != nil {
+				return fmt.Errorf("load existing demo user %s: %w", du.username, err)
+			}
+			log.Info("demo user already exists", "username", du.username)
 		case err != nil:
-			return fmt.Errorf("create demo user %s: %w", username, err)
+			return fmt.Errorf("create demo user %s: %w", du.username, err)
 		default:
-			log.Info("created demo user", "username", username, "password", demoPassword)
+			log.Info("created demo user", "username", du.username, "password", demoPassword)
 		}
+
+		if user.Role != du.role {
+			if _, err := store.UpdateUserRole(ctx, user.ID, du.role); err != nil {
+				return fmt.Errorf("set role for %s: %w", du.username, err)
+			}
+		}
+		log.Info("demo user role", "username", du.username, "role", du.role)
 	}
 
 	now := time.Now()
@@ -161,7 +183,7 @@ func run() error {
 
 	log.Info("seed complete",
 		"contest_id", contest.ID.String(),
-		"login", "alice / bob",
+		"logins", "alice (admin) / carol (moderator) / bob (user)",
 		"password", demoPassword,
 	)
 	return nil

@@ -3,6 +3,7 @@ package api
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateUsername(t *testing.T) {
@@ -78,5 +79,89 @@ func TestValidateLanguageCodeStdin(t *testing.T) {
 	}
 	if err := validateStdin(""); err != nil {
 		t.Errorf("validateStdin(empty) = %v", err)
+	}
+}
+
+func TestValidateSlug(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []string{"abc", "weekly-cup", "round-2", strings.Repeat("a", 64)} {
+		if err := validateSlug(s); err != nil {
+			t.Errorf("validateSlug(%q) = %v, want nil", s, err)
+		}
+	}
+	for _, s := range []string{"", "ab", "-leading", "Upper", "has space", "under_score", strings.Repeat("a", 65)} {
+		if err := validateSlug(s); err == nil {
+			t.Errorf("validateSlug(%q) = nil, want error", s)
+		}
+	}
+}
+
+func TestValidateContestTimesAndTitle(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	if err := validateContestTimes(now, now.Add(time.Hour)); err != nil {
+		t.Errorf("validateContestTimes(valid) = %v", err)
+	}
+	if err := validateContestTimes(now, now); err == nil {
+		t.Error("validateContestTimes(equal) = nil, want error")
+	}
+	if err := validateContestTimes(now, now.Add(-time.Hour)); err == nil {
+		t.Error("validateContestTimes(end before start) = nil, want error")
+	}
+
+	if err := validateContestTitle("Weekly Cup"); err != nil {
+		t.Errorf("validateContestTitle(valid) = %v", err)
+	}
+	for _, ti := range []string{"", "   ", strings.Repeat("a", 201)} {
+		if err := validateContestTitle(ti); err == nil {
+			t.Errorf("validateContestTitle(%q) = nil, want error", ti)
+		}
+	}
+}
+
+func TestValidateProblemFields(t *testing.T) {
+	t.Parallel()
+
+	if err := validateStatement("# Problem\n\nDo the thing."); err != nil {
+		t.Errorf("validateStatement(valid) = %v", err)
+	}
+	for _, s := range []string{"", "   \n ", strings.Repeat("a", maxStatementBytes+1)} {
+		if err := validateStatement(s); err == nil {
+			t.Errorf("validateStatement(invalid len %d) = nil, want error", len(s))
+		}
+	}
+
+	for _, ms := range []int{100, 2000, 10000} {
+		if err := validateTimeLimit(ms); err != nil {
+			t.Errorf("validateTimeLimit(%d) = %v", ms, err)
+		}
+	}
+	for _, ms := range []int{99, 10001, 0, -1} {
+		if err := validateTimeLimit(ms); err == nil {
+			t.Errorf("validateTimeLimit(%d) = nil, want error", ms)
+		}
+	}
+
+	for _, mb := range []int{16, 128, 512} {
+		if err := validateMemoryLimit(mb); err != nil {
+			t.Errorf("validateMemoryLimit(%d) = %v", mb, err)
+		}
+	}
+	for _, mb := range []int{15, 513, 0} {
+		if err := validateMemoryLimit(mb); err == nil {
+			t.Errorf("validateMemoryLimit(%d) = nil, want error", mb)
+		}
+	}
+
+	if err := validateTestCaseIO("1 2", "3"); err != nil {
+		t.Errorf("validateTestCaseIO(valid) = %v", err)
+	}
+	if err := validateTestCaseIO("", ""); err != nil {
+		t.Errorf("validateTestCaseIO(empty) = %v, want nil (empty allowed)", err)
+	}
+	if err := validateTestCaseIO(strings.Repeat("a", maxTestCaseFieldBytes+1), "x"); err == nil {
+		t.Error("validateTestCaseIO(oversize stdin) = nil, want error")
 	}
 }
