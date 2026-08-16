@@ -18,7 +18,7 @@ COPY services/executor/ /src/services/executor/
 
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 # Pull the latest patched OS packages (the base tag lags behind security
 # fixes — e.g. openssl libcrypto3/libssl3), then create the non-root user.
