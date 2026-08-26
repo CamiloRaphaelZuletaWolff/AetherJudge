@@ -4,7 +4,7 @@
 # The image also carries the sandbox Dockerfiles (/sandbox-images) so a
 # cluster init step can build them against a pod-local Docker-in-Docker
 # daemon — see infra/helm/arena/templates/executor.yaml and ADR-0009.
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 
 WORKDIR /src
 
