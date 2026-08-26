@@ -1,7 +1,7 @@
 # api-gateway image. Build context is backend/ (the gateway requires the
 # shared pkg module via a relative replace):
 #   docker build -t arena-gateway -f services/api-gateway/Dockerfile backend/
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 
 WORKDIR /src
 
