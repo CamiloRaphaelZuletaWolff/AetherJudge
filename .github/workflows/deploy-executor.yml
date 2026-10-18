@@ -1,0 +1,95 @@
+# Deploys the executor stack to the VM over SSH: updates the repo checkout on
+# the VM (~/aether) and runs infra/vm/deploy.sh, which pulls the GHCR images,
+# retags the sandboxes and restarts executor + Caddy.
+#
+# Triggers:
+#   - manually (Actions -> Deploy executor -> Run workflow), with an optional
+#     image tag (default "latest"; a short commit SHA pins/rolls back);
+#   - automatically after a successful "Executor images" run on main, using
+#     the exact images that run produced (tag = short commit SHA).
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   VM_HOST              public IP (or sslip.io name) of the VM
+#   VM_USER              SSH user: "ubuntu" on Oracle, your login on Google Cloud
+#   VM_SSH_KEY           the PRIVATE key (whole file, including BEGIN/END lines)
+#   VM_SSH_KNOWN_HOSTS   optional: output of `ssh-keyscan -t ed25519 <VM_HOST>`;
+#                        without it the host key is trusted on first use
+# While VM_HOST is unset the job is skipped with a notice, so the automatic
+# trigger never fails before the VM exists.
+name: Deploy executor
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy ("latest" or a short commit SHA)
+        required: true
+        default: latest
+  workflow_run:
+    workflows: [Executor images]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-executor
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to VM
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    env:
+      VM_HOST: ${{ secrets.VM_HOST }}
+      VM_USER: ${{ secrets.VM_USER }}
+    steps:
+      - name: Check configuration
+        id: cfg
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ -z "$VM_HOST" ] || [ -z "$VM_USER" ]; then
+            echo "::notice::VM_HOST / VM_USER secrets are not set - skipping deploy."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$RUN_SHA" ]; then tag="${RUN_SHA::7}"; else tag="${INPUT_TAG:-latest}"; fi
+          # Only [A-Za-z0-9_.-] — the tag is interpolated into a remote shell command.
+          case "$tag" in *[!A-Za-z0-9_.-]*|"") echo "::error::invalid image tag '$tag'"; exit 1 ;; esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Configure SSH
+        if: steps.cfg.outputs.skip == 'false'
+        env:
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_SSH_KNOWN_HOSTS: ${{ secrets.VM_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_vm
+          chmod 600 ~/.ssh/id_vm
+          if [ -n "$VM_SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$VM_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::VM_SSH_KNOWN_HOSTS not set - trusting the host key on first use."
+            ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$VM_HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: Pull repo and run deploy.sh on the VM
+        if: steps.cfg.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.cfg.outputs.tag }}
+        run: |
+          ssh -i ~/.ssh/id_vm -o IdentitiesOnly=yes -o ServerAliveInterval=30 \
+            "$VM_USER@$VM_HOST" bash -s -- "$TAG" <<'REMOTE'
+          set -euo pipefail
+          tag="$1"
+          cd ~/aether
+          git fetch --depth 1 origin main
+          git checkout -q -B main FETCH_HEAD
+          bash infra/vm/deploy.sh "$tag"
+          REMOTE

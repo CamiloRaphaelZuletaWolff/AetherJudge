@@ -1,6 +1,7 @@
 "use client";
 
-import { CalendarDays, CheckCircle2, Link2, Trophy } from "lucide-react";
+import { ArrowRight, CalendarDays, Code2, FileCode2, Link2 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { AuthGate } from "@/components/auth/auth-gate";
@@ -10,10 +11,12 @@ import { AppShell } from "@/components/shell/app-shell";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { buttonStyles } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import { ROLE_LABELS, roleOf, type Role } from "@/lib/rbac";
 import { useAuthStore } from "@/stores/auth";
 import { useProfileStore } from "@/stores/profile";
+import { useEditorStore } from "@/stores/editor";
 
 const roleVariant: Record<Role, "neutral" | "info" | "accent"> = {
   user: "neutral",
@@ -36,6 +39,7 @@ export default function ProfilePage() {
 function ProfileInner() {
   const user = useAuthStore((s) => s.user);
   const { displayName, bio, website } = useProfileStore();
+  const drafts = useEditorStore((s) => s.drafts);
   const [tab, setTab] = useState<Tab>("overview");
   if (!user) return null;
 
@@ -48,7 +52,7 @@ function ProfileInner() {
   return (
     <div className="flex flex-col gap-6">
       {/* Identity header */}
-      <Card className="flex flex-col items-start gap-5 p-6 sm:flex-row sm:items-center">
+      <Card className="relative flex flex-col items-start gap-5 overflow-hidden border-t-4 border-t-primary p-6 sm:flex-row sm:items-center sm:p-8">
         <Avatar name={user.username} size="xl" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -63,7 +67,7 @@ function ProfileInner() {
             <span className="inline-flex items-center gap-1.5">
               <CalendarDays className="size-3.5" /> Joined {joined}
             </span>
-            {website && (
+            {/^https?:\/\//i.test(website) && (
               <a
                 href={website}
                 target="_blank"
@@ -91,19 +95,44 @@ function ProfileInner() {
 
       {tab === "overview" && (
         <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard icon={CheckCircle2} label="Problems solved" value="—" hint="Problems solved" />
-          <StatCard icon={Trophy} label="Best rank" value="—" hint="Best contest rank" />
-          <StatCard icon={CalendarDays} label="Contests" value="—" hint="Contests entered" />
-          <Card className="p-4 text-sm text-faint sm:col-span-3">
-            Stats are placeholders for now — they&apos;ll populate once the profile/stats API is
-            wired up. The UI is ready for it.
+          <StatCard
+            icon={FileCode2}
+            label="Saved drafts on this device"
+            value={String(Object.keys(drafts).length)}
+          />
+          <StatCard
+            icon={Code2}
+            label="Languages in your drafts"
+            value={String(new Set(Object.keys(drafts).map((key) => key.split(":").at(-1))).size)}
+          />
+          <StatCard icon={CalendarDays} label="Member since" value={joined} />
+          <Card className="flex flex-wrap items-center justify-between gap-4 p-6 sm:col-span-3">
+            <div>
+              <h2 className="font-display font-semibold">Keep your momentum.</h2>
+              <p className="mt-1 text-sm text-muted">
+                Your code drafts are saved on this device. Reopen a contest to continue solving.
+              </p>
+            </div>
+            <Link href="/dashboard" className={buttonStyles({ variant: "secondary" })}>
+              Explore contests <ArrowRight className="size-4" />
+            </Link>
           </Card>
         </div>
       )}
 
       {tab === "submissions" && (
-        <Card className="p-10 text-center text-sm text-faint">
-          A unified submission history across contests will appear here once the backend exposes it.
+        <Card className="p-10 text-center">
+          <FileCode2 className="mx-auto mb-4 size-8 text-primary" />
+          <h2 className="font-display text-lg font-semibold">
+            Every attempt is part of the story.
+          </h2>
+          <p className="mx-auto mb-5 mt-2 max-w-sm text-sm text-muted">
+            Open a contest to find your submissions, verdicts, and execution times in My
+            submissions.
+          </p>
+          <Link href="/dashboard" className={buttonStyles({ variant: "secondary" })}>
+            Find a contest <ArrowRight className="size-4" />
+          </Link>
         </Card>
       )}
 

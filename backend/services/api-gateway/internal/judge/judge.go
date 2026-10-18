@@ -19,14 +19,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	executorv1 "github.com/caezu/arena/backend/pkg/pb/executor/v1"
 
@@ -133,24 +130,6 @@ type Service struct {
 	tracer   trace.Tracer
 
 	wg sync.WaitGroup
-}
-
-// Dial connects the executor gRPC client with client-side round-robin load
-// balancing across all backends a (headless) DNS name resolves to, so the
-// gateway fans Execute calls across executor replicas (ADR-0011). The
-// connection is lazy; failures surface per-call.
-func Dial(addr string) (executorv1.ExecutorServiceClient, *grpc.ClientConn, error) {
-	conn, err := grpc.NewClient(addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`),
-		// Client spans + W3C propagation toward the executor; no-op when
-		// tracing is disabled.
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("judge: dial executor at %s: %w", addr, err)
-	}
-	return executorv1.NewExecutorServiceClient(conn), conn, nil
 }
 
 // New builds a judge service.

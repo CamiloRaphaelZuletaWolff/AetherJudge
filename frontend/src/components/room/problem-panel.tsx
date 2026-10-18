@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Cpu, Timer } from "lucide-react";
+import { BookOpen, Cpu, Timer } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -35,19 +35,35 @@ export function ProblemPanel({
 
   return (
     <Card className="flex flex-col gap-4 p-5" data-testid="problem-panel">
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-2 font-display text-sm font-semibold">
+          <BookOpen className="size-4 text-primary" /> Problems
+        </h2>
+        <span className="text-xs text-muted">
+          {problems.findIndex((p) => p.ord === selectedOrd) + 1} of {problems.length}
+        </span>
+      </div>
+      <div
+        className="flex flex-wrap gap-1.5 border-b border-border pb-4"
+        role="group"
+        aria-label="Choose a problem"
+      >
         {problems.map((p) => {
           const active = p.ord === selectedOrd;
           return (
             <button
               key={p.ord}
+              type="button"
+              aria-pressed={active}
+              aria-label={`Problem ${p.ord}: ${p.title}`}
+              title={p.title}
               onClick={() => onSelect(p.ord)}
               data-testid={`problem-tab-${p.ord}`}
               className={cn(
-                "cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                "min-h-10 cursor-pointer rounded-lg border border-transparent px-3 py-2 text-sm font-medium transition-colors",
                 active
                   ? "bg-primary text-primary-foreground"
-                  : "bg-surface-2 text-muted hover:text-foreground",
+                  : "border-border bg-surface-2 text-muted hover:border-primary/30 hover:text-foreground",
               )}
             >
               <span className="font-mono text-xs opacity-70">{p.ord}</span>{" "}
@@ -69,7 +85,7 @@ export function ProblemPanel({
         <ErrorNotice message={query.error.message} onRetry={() => void query.refetch()} />
       )}
       {query.isSuccess && (
-        <div data-testid="problem-statement">
+        <div data-testid="problem-statement" className="min-w-0">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <h2 className="font-display text-xl font-semibold">{query.data.title}</h2>
             <Badge variant="neutral">

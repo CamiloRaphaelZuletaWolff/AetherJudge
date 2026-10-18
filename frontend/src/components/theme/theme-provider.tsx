@@ -18,8 +18,12 @@ const STORAGE_KEY = "arena-theme";
 
 function apply(theme: Theme) {
   const el = document.documentElement;
+  el.setAttribute("data-theme-switching", "");
   el.classList.toggle("dark", theme === "dark");
   el.style.colorScheme = theme;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => el.removeAttribute("data-theme-switching")),
+  );
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {

@@ -4,8 +4,9 @@ Arena is built for Kubernetes (see the [Helm chart](../infra/helm/arena/) and
 [ADR-0009](adr/0009-kubernetes-deployment.md)), but the API and frontend also
 run well on managed PaaS. This documents a real, low-cost deployment:
 
-- **api-gateway** → Render (Docker web service)
-- **PostgreSQL + Redis** → Render (managed Postgres + Key Value)
+- **api-gateway** → Render (free Docker web service, judges in-process)
+- **Redis** → Render Key Value (free, internal-only)
+- **PostgreSQL** → Neon (free; Render's free Postgres expires after 30 days)
 - **frontend** → Vercel
 - **executor** → *not* a PaaS web service — it needs a privileged Docker daemon
   to sandbox untrusted code, so it runs on Kubernetes or a VM (see below)
@@ -13,9 +14,10 @@ run well on managed PaaS. This documents a real, low-cost deployment:
 ## Topology
 
 ```
- Vercel (Next.js)  ──REST/WS──▶  Render: api-gateway ──▶ Render Postgres
-        │                              │            └──▶ Render Key Value (Redis)
-        └────────── browser ──────────┘            └──▶ executor (k8s / VM, gRPC)
+ Vercel (Next.js)  ──REST/WS──▶  Render: api-gateway ──▶ Neon Postgres
+        │                              │            ├──▶ Render Key Value (Redis)
+        └────────── browser ──────────┘            └──▶ executor VM (gRPC over TLS
+                                                         via Caddy, bearer token)
 ```
 
 ## Why the executor is special
@@ -30,9 +32,16 @@ So judging runs where we control the daemon:
   StatefulSet with a privileged Docker-in-Docker sidecar — the only privileged
   container in the system (ADR-0009). Point the gateway's `EXECUTOR_ADDR` at the
   in-cluster service.
-- **A VM** with Docker installed: build the sandbox images (`task
-  executor:images`), run the executor exposing gRPC `:9090`, and set the
-  gateway's `EXECUTOR_ADDR` to that host. Lock the port to the gateway's egress.
+- **A VM** with Docker installed (`infra/vm/`): the executor and Caddy run
+  under Docker Compose, pulling multi-arch images that
+  `.github/workflows/executor-images.yml` publishes to GHCR. Caddy terminates
+  TLS for `<ip-with-dashes>.sslip.io` with an automatic Let's Encrypt
+  certificate and proxies gRPC (h2c) to the executor, whose port is bound to
+  loopback only. Every Execute call must carry `authorization: Bearer
+  <EXECUTOR_AUTH_TOKEN>` (constant-time check; health checks stay open). The
+  gateway sets `EXECUTOR_ADDR=<host>.sslip.io:443`, `EXECUTOR_TLS=true` and the
+  same token. The step-by-step guide (Oracle Cloud Always Free Ampere A1, or a
+  Google Cloud `e2-micro`) is [`DEPLOY.md`](../DEPLOY.md) (Spanish).
 
 With no reachable executor, set `JUDGE_WORKERS=0` so the gateway is a clean
 producer: the REST/WebSocket API (auth, contests, problems, leaderboard) works
@@ -52,9 +61,11 @@ full set):
 | `APP_ENV` | `production` (enables `Secure`/`SameSite=None` cookies; requires a strong `JWT_SECRET`) |
 | `JWT_SECRET` | a strong random value (Render's `generateValue` does this) |
 | `GATEWAY_HTTP_ADDR` | `:10000` (Render routes to 10000 by default) |
-| `DATABASE_URL` | the managed Postgres connection string |
-| `REDIS_ADDR` | the Key Value **host:port** (not a `redis://` URL) |
+| `DATABASE_URL` | the Postgres connection string (Neon: the *direct*, non-pooler host, `?sslmode=require`) |
+| `REDIS_ADDR` | a `host:port` or a `redis://` / `rediss://` URL (the Blueprint wires the Key Value's internal `connectionString`) |
 | `EXECUTOR_ADDR` | the executor's address, or a placeholder + `JUDGE_WORKERS=0` |
+| `EXECUTOR_TLS` | `true` when the executor sits behind a public TLS proxy (Caddy) |
+| `EXECUTOR_AUTH_TOKEN` | shared bearer token; must equal the executor's `EXECUTOR_AUTH_TOKEN` |
 | `FRONTEND_ORIGIN` | the exact frontend origin, e.g. `https://app.vercel.app` |
 
 ## Frontend on Vercel
@@ -82,10 +93,10 @@ These are real failures encountered bringing this up, with the fix:
    Postgres also offers a public *External* URL (with `sslmode=require`) that
    resolves anywhere; Key Value does **not**.
 
-3. **Redis must be non-TLS host:port.** The gateway's Redis client uses plain
-   TCP and reads `REDIS_ADDR` (a `host:port`), not a URL. Upstash is TLS-only
-   and will fail at startup (`redisx: ping`). Use a Render Key Value's internal
-   address instead.
+3. **Redis address format.** `REDIS_ADDR` accepts a bare `host:port`
+   (plaintext, no auth) or a `redis://` / `rediss://` URL (credentials, TLS).
+   The Render Key Value's *internal* URL needs no password; keep the instance
+   in the gateway's region and `ipAllowList: []` so it is never public.
 
 4. **Cross-site session cookie.** With the frontend and API on different sites
    (`*.vercel.app` ↔ `*.onrender.com`), a `SameSite=Lax` refresh cookie is never

@@ -83,10 +83,19 @@ func run() error {
 		}
 	}()
 
-	executorClient, executorConn, err := judge.Dial(cfg.ExecutorAddr)
+	executorClient, executorConn, err := judge.Dial(cfg.ExecutorAddr, judge.DialConfig{
+		AuthToken: cfg.ExecutorAuthToken,
+		TLS:       cfg.ExecutorTLS,
+	})
 	if err != nil {
 		return fmt.Errorf("dial executor: %w", err)
 	}
+	if cfg.ExecutorAuthToken == "" {
+		log.Warn("EXECUTOR_AUTH_TOKEN is empty: calling the executor without authentication " +
+			"(fine for local dev / in-cluster; never for an internet-reachable executor)")
+	}
+	log.Info("executor client configured",
+		"addr", cfg.ExecutorAddr, "tls", cfg.ExecutorTLS, "auth", cfg.ExecutorAuthToken != "")
 	defer func() {
 		if err := executorConn.Close(); err != nil {
 			log.Warn("close executor connection", "error", err)

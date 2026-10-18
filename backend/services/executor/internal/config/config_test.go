@@ -23,6 +23,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DockerHost != "" {
 		t.Errorf("DockerHost = %q, want empty", cfg.DockerHost)
 	}
+	if cfg.AuthToken != "" {
+		t.Error("AuthToken should default to empty (auth disabled for local dev)")
+	}
 	if cfg.ImageTag != "latest" {
 		t.Errorf("ImageTag = %q, want %q", cfg.ImageTag, "latest")
 	}
@@ -59,6 +62,7 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 	t.Setenv("EXECUTOR_RUN_MEMORY_MB", "64")
 	t.Setenv("EXECUTOR_IMAGE_TAG", "v2")
 	t.Setenv("EXECUTOR_DOCKER_HOST", "tcp://10.0.0.5:2375")
+	t.Setenv("EXECUTOR_AUTH_TOKEN", "0123456789abcdef0123456789abcdef")
 
 	cfg, err := Load()
 	if err != nil {
@@ -83,6 +87,9 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 	if cfg.DockerHost != "tcp://10.0.0.5:2375" {
 		t.Errorf("DockerHost = %q, want %q", cfg.DockerHost, "tcp://10.0.0.5:2375")
 	}
+	if cfg.AuthToken != "0123456789abcdef0123456789abcdef" {
+		t.Error("AuthToken was not loaded from EXECUTOR_AUTH_TOKEN")
+	}
 }
 
 func TestLoadRejectsInvalidValues(t *testing.T) {
@@ -98,6 +105,9 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"zero memory", "EXECUTOR_RUN_MEMORY_MB", "0"},
 		{"max below default timeout", "EXECUTOR_RUN_TIMEOUT_MAX_MS", "100"},
 		{"max below default memory", "EXECUTOR_RUN_MEMORY_MAX_MB", "1"},
+		{"auth token too short", "EXECUTOR_AUTH_TOKEN", "short"},
+		{"auth token with whitespace", "EXECUTOR_AUTH_TOKEN", "0123456789abcdef 0123456789abcdef"},
+		{"auth token with trailing newline", "EXECUTOR_AUTH_TOKEN", "0123456789abcdef0123456789abcdef\n"},
 	}
 
 	for _, tt := range tests {

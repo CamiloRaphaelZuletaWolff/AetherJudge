@@ -1,0 +1,60 @@
+# Loads the demo data (users alice/bob/carol with password "password123", the
+# "Arena Demo Contest" and its problems) into the production database.
+#
+# Why a workflow: Render's free plan has no shell, so this is the "no-shell
+# ops" path — it runs the same `go run ./cmd/seed` you would run locally,
+# from a GitHub runner, against Neon.
+#
+# Safe to re-run (idempotent). cmd/seed applies the embedded migrations
+# itself before inserting, so it also works before the gateway's first boot.
+# It refuses APP_ENV=production, hence APP_ENV=dev below: that only affects
+# this one-off process, not the deployed gateway.
+#
+# Secret required: NEON_DATABASE_URL — the Neon *direct* (non-pooled)
+# connection string, ending in ?sslmode=require.
+name: Seed demo data
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type "seed" to load the demo users and contest into the production database
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seed
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    name: go run ./cmd/seed
+    runs-on: ubuntu-24.04
+    if: inputs.confirm == 'seed'
+    steps:
+      - name: Check secret
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Repository secret NEON_DATABASE_URL is not set."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.work
+          cache-dependency-path: backend/**/go.sum
+
+      - name: Seed
+        working-directory: backend/services/api-gateway
+        env:
+          APP_ENV: dev
+          LOG_LEVEL: info
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: go run ./cmd/seed

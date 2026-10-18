@@ -19,6 +19,13 @@ export function Markdown({ children, className }: { children: string; className?
           p: (props) => <p className="mb-3" {...props} />,
           ul: (props) => <ul className="mb-3 list-disc pl-5" {...props} />,
           ol: (props) => <ol className="mb-3 list-decimal pl-5" {...props} />,
+          pre: (props) => (
+            <pre
+              className="mb-4 overflow-x-auto rounded-xl border border-border bg-surface-2 p-4 [&_code]:bg-transparent [&_code]:p-0"
+              {...props}
+            />
+          ),
+          a: (props) => <a className="text-primary underline underline-offset-4" {...props} />,
           code: (props) => (
             <code
               className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-primary"

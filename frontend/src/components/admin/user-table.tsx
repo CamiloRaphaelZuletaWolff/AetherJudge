@@ -5,6 +5,9 @@
 // mirroring the backend's anti-lockout guardrail — but the API is the real
 // boundary, not this UI.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Search } from "lucide-react";
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
 
 import { Avatar } from "@/components/ui/avatar";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -24,6 +27,7 @@ const roleBadge: Record<Role, BadgeVariant> = {
 };
 
 export function UserTable() {
+  const [search, setSearch] = useState("");
   const me = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -65,23 +69,42 @@ export function UserTable() {
 
   return (
     <Card className="overflow-hidden p-0" data-testid="user-table">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-4">
         <h2 className="font-display text-sm font-semibold">
           Users <span className="font-normal text-faint">({users.data.users.length})</span>
         </h2>
         <span className="text-xs text-faint">Change a role to grant or revoke access</span>
       </div>
+      <div className="relative m-4">
+        <Search className="pointer-events-none absolute left-3 top-3 size-4 text-faint" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search members"
+          placeholder="Search by username or email…"
+          className="pl-9"
+        />
+      </div>
       <ul className="divide-y divide-border">
-        {users.data.users.map((u) => (
-          <UserRow
-            key={u.id}
-            user={u}
-            isSelf={u.id === me?.id}
-            pending={changeRole.isPending && changeRole.variables?.id === u.id}
-            onRoleChange={(role) => changeRole.mutate({ id: u.id, role })}
-          />
-        ))}
+        {users.data.users
+          .filter((u) => `${u.username} ${u.email}`.toLowerCase().includes(search.toLowerCase()))
+          .map((u) => (
+            <UserRow
+              key={u.id}
+              user={u}
+              isSelf={u.id === me?.id}
+              pending={changeRole.isPending && changeRole.variables?.id === u.id}
+              onRoleChange={(role) => changeRole.mutate({ id: u.id, role })}
+            />
+          ))}
       </ul>
+      {!users.data.users.some((u) =>
+        `${u.username} ${u.email}`.toLowerCase().includes(search.toLowerCase()),
+      ) && (
+        <p className="px-4 py-8 text-center text-sm text-muted">
+          No matching members. Try another username or email.
+        </p>
+      )}
     </Card>
   );
 }

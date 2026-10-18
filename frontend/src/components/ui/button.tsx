@@ -6,11 +6,11 @@ import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/cn";
 
-const button = cva(
+export const buttonStyles = cva(
   [
     "inline-flex items-center justify-center gap-2 rounded-[var(--radius)] font-medium whitespace-nowrap",
     "transition-[background-color,border-color,color,box-shadow,transform] duration-150",
-    "cursor-pointer select-none active:scale-[0.98]",
+    "arena-button cursor-pointer select-none",
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
     "disabled:pointer-events-none disabled:opacity-55",
   ],
@@ -29,7 +29,7 @@ const button = cva(
         sm: "h-8 px-3 text-xs",
         md: "h-10 px-4 text-sm",
         lg: "h-11 px-6 text-sm",
-        icon: "size-9 p-0",
+        icon: "size-10 p-0",
       },
     },
     defaultVariants: { variant: "primary", size: "md" },
@@ -37,7 +37,7 @@ const button = cva(
 );
 
 export interface ButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof button> {
+  extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonStyles> {
   loading?: boolean;
 }
 
@@ -48,8 +48,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   return (
     <button
       ref={ref}
+      aria-busy={loading || undefined}
       disabled={disabled || loading}
-      className={cn(button({ variant, size }), className)}
+      className={cn(buttonStyles({ variant, size }), className)}
       {...props}
     >
       {loading && <Spinner className="size-4" />}

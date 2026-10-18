@@ -23,15 +23,15 @@ export function SettingsForm() {
       onSubmit={(e) => {
         e.preventDefault();
         setPrefs(form);
-        toast("Profile saved");
+        toast("Preferences saved on this device");
       }}
       className="flex flex-col gap-5"
     >
       <Card className="flex items-start gap-2.5 border-v-ce/30 bg-v-ce/10 p-3 text-sm text-v-ce">
         <Info className="mt-0.5 size-4 shrink-0" />
         <p>
-          These preferences are saved locally on this device for now. They&apos;ll sync to your
-          account once the profile API ships.
+          Personalize how your profile appears on this device. These preferences stay in this
+          browser.
         </p>
       </Card>
 
@@ -39,10 +39,13 @@ export function SettingsForm() {
         label="Display name"
         value={form.displayName}
         onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
-        placeholder="How your name appears to others"
+        placeholder="Your preferred name on this device"
       />
       <Field
         label="Website"
+        type="url"
+        pattern="https?://.*"
+        hint="Use a full address starting with https:// or http://."
         value={form.website}
         onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))}
         placeholder="https://your-site.dev"

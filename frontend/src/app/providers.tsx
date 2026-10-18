@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "framer-motion";
 import { useEffect, useState } from "react";
 
+import { ServerWakeBanner } from "@/components/shell/server-wake-banner";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { ToastProvider } from "@/components/ui/toast";
 import { ApiError } from "@/lib/api";
@@ -31,13 +32,32 @@ export function Providers({ children }: { children: React.ReactNode }) {
     void bootstrap();
   }, [bootstrap]);
 
+  useEffect(() => {
+    const keyboard = () => {
+      document.documentElement.dataset.inputModality = "keyboard";
+    };
+    const pointer = () => {
+      document.documentElement.dataset.inputModality = "pointer";
+    };
+    document.addEventListener("keydown", keyboard, true);
+    document.addEventListener("pointerdown", pointer, true);
+    return () => {
+      document.removeEventListener("keydown", keyboard, true);
+      document.removeEventListener("pointerdown", pointer, true);
+    };
+  }, []);
+
   return (
     <ThemeProvider>
       {/* reducedMotion="user" makes every Framer animation honor the OS
           setting automatically — no per-component guards needed. */}
       <MotionConfig reducedMotion="user">
         <QueryClientProvider client={queryClient}>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            {children}
+            {/* Cold-start hint for the free-tier API (sleeps when idle). */}
+            <ServerWakeBanner />
+          </ToastProvider>
         </QueryClientProvider>
       </MotionConfig>
     </ThemeProvider>

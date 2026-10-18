@@ -59,6 +59,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: JWT_SECRET
+            - name: EXECUTOR_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: EXECUTOR_AUTH_TOKEN
             - name: JUDGE_WORKERS
               value: {{ .Values.worker.judgeWorkers | quote }}
             - name: CONSUMER_NAME

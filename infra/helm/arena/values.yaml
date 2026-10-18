@@ -75,6 +75,10 @@ auth:
   # Dev-grade secret (>= 32 chars). Override via --set auth.jwtSecret=... or
   # replace the Secret with an externally managed one.
   jwtSecret: kind-local-dev-secret-0123456789abcdef0123456789
+  # Shared gateway<->executor bearer token (EXECUTOR_AUTH_TOKEN). Empty keeps
+  # gRPC authentication off, which is fine inside the cluster network; set it
+  # (>= 32 chars) if the executor is ever reachable from outside.
+  executorToken: ""
 
 config:
   appEnv: dev

@@ -30,5 +30,6 @@ metadata:
 type: Opaque
 stringData:
   JWT_SECRET: {{ .Values.auth.jwtSecret | quote }}
+  EXECUTOR_AUTH_TOKEN: {{ .Values.auth.executorToken | default "" | quote }}
   DATABASE_URL: {{ include "arena.databaseUrl" . | quote }}
   POSTGRES_PASSWORD: {{ .Values.postgres.password | quote }}

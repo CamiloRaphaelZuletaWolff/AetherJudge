@@ -31,10 +31,13 @@ function NavLink({ item }: { item: NavItem }) {
   return (
     <Link
       href={item.href}
+      aria-label={item.label}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "inline-flex items-center gap-2 rounded-[var(--radius)] px-3 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-foreground/5 text-foreground" : "text-muted hover:text-foreground",
+        "inline-flex min-h-10 items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-sm font-medium transition-colors",
+        active
+          ? "bg-primary/10 text-primary"
+          : "text-muted hover:bg-foreground/5 hover:text-foreground",
       )}
     >
       <Icon className="size-4" />
@@ -46,9 +49,12 @@ function NavLink({ item }: { item: NavItem }) {
 export function TopNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-2 px-4 sm:px-6">
-        <Logo />
-        <nav className="ml-4 flex items-center gap-1">
+      <a href="#main-content" className="skip-link">
+        Skip to content
+      </a>
+      <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-2 px-4 sm:px-8">
+        <Logo className="shrink-0 [&>span:last-child]:hidden sm:[&>span:last-child]:inline" />
+        <nav aria-label="Main navigation" className="ml-1 flex items-center gap-1 sm:ml-6">
           {NAV.map((item) =>
             item.perm ? (
               <Can key={item.href} perm={item.perm}>
@@ -74,7 +80,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       <TopNav />
-      <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">{children}</main>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-10"
+      >
+        {children}
+      </main>
     </div>
   );
 }

@@ -23,6 +23,7 @@ export function UserMenu() {
 
   return (
     <DropdownMenu
+      label={`Account menu for ${user.username}`}
       trigger={
         <span className="flex items-center gap-2 rounded-full p-0.5 transition-opacity hover:opacity-90">
           <Avatar name={user.username} size="sm" />

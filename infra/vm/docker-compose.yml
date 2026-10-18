@@ -1,0 +1,79 @@
+# AetherJudge executor host — a single Linux VM (Oracle Cloud Always Free
+# Ampere A1, or a Google Cloud e2-micro). See DEPLOY.md, Parts 4-6.
+#
+#   executor  the gRPC judging service. It launches every submission in an
+#             ephemeral sibling container through the host Docker daemon
+#             (ADR-0005), hence the docker.sock mount. Its gRPC port is bound
+#             to 127.0.0.1 only: the internet reaches it exclusively through
+#             Caddy, over TLS, and every Execute call must carry the bearer
+#             token (EXECUTOR_AUTH_TOKEN).
+#   caddy     public TLS terminator. Obtains and renews a Let's Encrypt
+#             certificate for <ip-with-dashes>.sslip.io automatically (needs
+#             ports 80 and 443 open) and forwards gRPC to the executor over
+#             cleartext HTTP/2 (h2c) on the private compose network.
+#
+# Do not run this file by hand on first install — use deploy.sh, which pulls
+# and retags the sandbox images the executor expects first.
+#
+#   cd ~/aether/infra/vm && ./deploy.sh
+name: aether
+
+services:
+  executor:
+    image: ghcr.io/${GHCR_OWNER:-camiloraphaelzuletawolff}/aether-executor:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # The image runs as non-root uid 10001; joining the host's docker group
+    # (by numeric GID — the name means nothing inside the container) is what
+    # lets it open /var/run/docker.sock. deploy.sh fills DOCKER_GID in.
+    group_add:
+      - "${DOCKER_GID:?DOCKER_GID is not set - run deploy.sh, or: getent group docker | cut -d: -f3}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      EXECUTOR_GRPC_ADDR: ":9090"
+      EXECUTOR_METRICS_ADDR: ":9101"
+      # Refuse to start without a token: this host is internet-facing.
+      EXECUTOR_AUTH_TOKEN: "${EXECUTOR_AUTH_TOKEN:?EXECUTOR_AUTH_TOKEN must be set in infra/vm/.env}"
+      # deploy.sh retags ghcr.io/<owner>/aether-sandbox-<lang>:<IMAGE_TAG> to
+      # the local names the executor resolves: arena-sandbox-<lang>:<IMAGE_TAG>.
+      EXECUTOR_IMAGE_TAG: "${IMAGE_TAG:-latest}"
+      # Sandboxes judged at once. 1 for a 1 GB e2-micro; 2-4 on an A1 Flex
+      # with 12-24 GB. Keep Render's JUDGE_WORKERS equal to this value.
+      EXECUTOR_MAX_CONCURRENT: "${EXECUTOR_MAX_CONCURRENT:-1}"
+      # 20 s default; slow shared vCPUs (e2-micro + swap) need more. Stay
+      # under ~40 s: the gateway's per-test-case deadline is limit + 45 s.
+      EXECUTOR_COMPILE_TIMEOUT_MS: "${EXECUTOR_COMPILE_TIMEOUT_MS:-20000}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      LOG_FORMAT: json
+    # Loopback only: handy for `grpcurl`/debugging on the VM itself, never
+    # reachable from outside. Caddy talks to executor:9090 on the compose
+    # network instead.
+    ports:
+      - "127.0.0.1:9090:9090"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - executor
+    ports:
+      - "80:80"      # ACME HTTP-01 challenge + redirect to HTTPS
+      - "443:443"    # gRPC over TLS (HTTP/2)
+    environment:
+      EXECUTOR_DOMAIN: "${EXECUTOR_DOMAIN:?EXECUTOR_DOMAIN must be set in infra/vm/.env (e.g. 203-0-113-7.sslip.io)}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates persist across restarts — re-issuing on every restart
+      # would hit Let's Encrypt rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  caddy_data:
+  caddy_config:

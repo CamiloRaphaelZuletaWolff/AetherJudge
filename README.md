@@ -260,8 +260,9 @@ docs/                      architecture overview + ADRs
   and accepted residual risks.
 - [Deployment guide](docs/deployment.md) — Render + Vercel + executor-on-k8s/VM,
   with the gotchas.
-- [DEPLOY.md](DEPLOY.md) — step-by-step free-tier deployment to a live public URL
-  (Render + Vercel + AWS EC2), written for first-time users.
+- [DEPLOY.md](DEPLOY.md) — step-by-step, 100% free deployment to a live public
+  URL (Vercel + Render + Neon + an Oracle Cloud Always Free executor VM behind
+  TLS and a bearer token), written in Spanish for first-time users.
 
 ## Roadmap
 

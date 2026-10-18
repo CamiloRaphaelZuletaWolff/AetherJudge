@@ -38,6 +38,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.IsProduction() {
 		t.Error("IsProduction() = true for dev defaults")
 	}
+	if cfg.ExecutorAuthToken != "" || cfg.ExecutorTLS {
+		t.Errorf("executor security defaults = (token set: %v, tls: %v), want (false, false)",
+			cfg.ExecutorAuthToken != "", cfg.ExecutorTLS)
+	}
 }
 
 func TestLoadEnvironmentOverrides(t *testing.T) {
@@ -78,6 +82,9 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"negative workers", "JUDGE_WORKERS", "-1"},
 		{"zero queue depth limit", "JUDGE_QUEUE_DEPTH_LIMIT", "0"},
 		{"negative rate limit", "RATE_LIMIT_AUTH_PER_MIN", "-1"},
+		{"non-boolean executor tls", "EXECUTOR_TLS", "yes please"},
+		{"executor token with whitespace", "EXECUTOR_AUTH_TOKEN", "abc def"},
+		{"executor token with trailing newline", "EXECUTOR_AUTH_TOKEN", "abcdef\n"},
 	}
 
 	for _, tt := range tests {
@@ -111,5 +118,36 @@ func TestProductionRequiresRealJWTSecret(t *testing.T) {
 	t.Setenv("JWT_SECRET", "a-genuinely-long-random-secret-value-0123456789")
 	if _, err := Load(); err != nil {
 		t.Fatalf("production with strong secret: %v", err)
+	}
+}
+
+func TestLoadExecutorSecurity(t *testing.T) {
+	t.Setenv("EXECUTOR_ADDR", "203-0-113-7.sslip.io:443")
+	t.Setenv("EXECUTOR_AUTH_TOKEN", "tok-0123456789")
+	t.Setenv("EXECUTOR_TLS", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ExecutorAddr != "203-0-113-7.sslip.io:443" {
+		t.Errorf("ExecutorAddr = %q", cfg.ExecutorAddr)
+	}
+	if cfg.ExecutorAuthToken != "tok-0123456789" {
+		t.Error("ExecutorAuthToken was not loaded from EXECUTOR_AUTH_TOKEN")
+	}
+	if !cfg.ExecutorTLS {
+		t.Error("ExecutorTLS = false, want true")
+	}
+
+	// An explicitly empty EXECUTOR_TLS (e.g. a blank dashboard field) keeps
+	// the plaintext default instead of failing startup.
+	t.Setenv("EXECUTOR_TLS", "")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load with empty EXECUTOR_TLS: %v", err)
+	}
+	if cfg.ExecutorTLS {
+		t.Error("empty EXECUTOR_TLS should mean false")
 	}
 }

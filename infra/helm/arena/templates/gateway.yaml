@@ -74,6 +74,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: JWT_SECRET
+            - name: EXECUTOR_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: EXECUTOR_AUTH_TOKEN
             # Web tier: 0 by default so the dedicated worker deployment owns
             # judging (set >0 to also judge in-process, e.g. single-node dev).
             - name: JUDGE_WORKERS

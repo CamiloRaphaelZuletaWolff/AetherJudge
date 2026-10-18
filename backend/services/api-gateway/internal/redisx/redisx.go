@@ -6,8 +6,10 @@ package redisx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
@@ -21,8 +23,17 @@ type Client struct {
 
 // Connect opens a Redis client and verifies connectivity. Commands emit
 // OTel spans (a no-op when tracing is disabled).
+//
+// addr is either a bare host:port (plaintext, no auth — local dev, the Helm
+// chart) or a redis:// / rediss:// URL, which may carry credentials, a DB
+// number and TLS. The URL form lets a Render Blueprint wire a Key Value's
+// `connectionString` straight into REDIS_ADDR.
 func Connect(ctx context.Context, addr string, log *slog.Logger) (*Client, error) {
-	rdb := redis.NewClient(&redis.Options{Addr: addr})
+	opts, err := clientOptions(addr)
+	if err != nil {
+		return nil, err
+	}
+	rdb := redis.NewClient(opts)
 	if err := redisotel.InstrumentTracing(rdb); err != nil {
 		return nil, fmt.Errorf("redisx: instrument tracing: %w", err)
 	}
@@ -50,4 +61,19 @@ func (c *Client) Close() error {
 		return fmt.Errorf("redisx: close: %w", err)
 	}
 	return nil
+}
+
+// clientOptions turns REDIS_ADDR into client options. URLs are parsed by
+// go-redis (redis://[user:pass@]host:port[/db], rediss:// for TLS); anything
+// else is treated as a bare host:port.
+func clientOptions(addr string) (*redis.Options, error) {
+	if strings.HasPrefix(addr, "redis://") || strings.HasPrefix(addr, "rediss://") {
+		opts, err := redis.ParseURL(addr)
+		if err != nil {
+			// Deliberately not wrapping err: it may echo the URL, password included.
+			return nil, errors.New("redisx: REDIS_ADDR is not a valid redis:// or rediss:// URL")
+		}
+		return opts, nil
+	}
+	return &redis.Options{Addr: addr}, nil
 }

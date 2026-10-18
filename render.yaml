@@ -1,42 +1,73 @@
-# Render Blueprint — AetherJudge backend (api-gateway).
+# Render Blueprint — AetherJudge backend: api-gateway + Redis (Key Value).
 #
-# The gateway runs here; the `executor` runs elsewhere (a VM or Kubernetes)
-# because it sandboxes untrusted code by launching sibling Docker containers,
-# which needs a privileged Docker daemon Render does not provide. Set
-# EXECUTOR_ADDR to that host's gRPC address (host:port) and JUDGE_WORKERS to a
-# positive number so the gateway judges submissions against it. The full
-# free-tier walkthrough (gateway here, executor on AWS EC2, frontend on Vercel)
-# is in DEPLOY.md.
+# 100%-free topology (step-by-step guide in DEPLOY.md):
+#   - this file: the api-gateway (free Docker web service, judges in-process
+#     with JUDGE_WORKERS) and a free Key Value (Redis) on Render's private
+#     network;
+#   - PostgreSQL on Neon's free plan — NOT Render Postgres, whose free
+#     databases expire after 30 days (that is what took the first deploy
+#     down). Paste Neon's connection string into DATABASE_URL;
+#   - the executor on a VM (Oracle Cloud Always Free, or Google e2-micro),
+#     because it sandboxes untrusted code in sibling Docker containers, which
+#     needs a Docker daemon Render does not provide. The gateway reaches it
+#     over TLS (Caddy + Let's Encrypt on <ip>.sslip.io) with a bearer token.
 #
-# IMPORTANT: both Dockerfiles expect the build context to be `backend/`
-# (they COPY `pkg/` and `services/...`). That is set via dockerContext below.
+# IMPORTANT: the Dockerfile expects the build context to be `backend/` (it
+# COPYs `pkg/` and `services/...`). That is set via dockerContext below.
 
 services:
   - type: web
     name: aether-api-gateway
     runtime: docker
-    plan: free
-    region: oregon                                 # MUST match your Postgres/Key Value region
+    plan: free                                     # 512 MB RAM, sleeps after 15 min idle (~1 min cold start)
+    region: oregon                                 # same region as the Key Value (private network is per-region);
+                                                   # Neon in AWS us-west-2 and the VM in US West keep latency low
     dockerfilePath: ./backend/services/api-gateway/Dockerfile
     dockerContext: ./backend                       # <-- the fix for the "not found" build error
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
       - key: APP_ENV
-        value: production                          # enables secure cookies; requires a strong JWT_SECRET
+        value: production                          # Secure + SameSite=None cookies, HSTS; refuses a weak JWT_SECRET
       - key: LOG_FORMAT
         value: json
       - key: GATEWAY_HTTP_ADDR
         value: ":10000"                            # Render routes to port 10000 by default
       - key: JWT_SECRET
-        generateValue: true                        # Render generates a strong random secret
+        generateValue: true                        # Render generates a strong random secret once
       - key: JUDGE_WORKERS
-        value: "2"                                 # gateway consumes the queue and judges via the executor
-      - key: EXECUTOR_ADDR
-        sync: false                                # your executor host's gRPC address, e.g. 54.12.34.56:9090
+        value: "1"                                 # judge consumers in this process. 1 keeps the 512 MB
+                                                   # instance comfortable and never exceeds the executor's
+                                                   # EXECUTOR_MAX_CONCURRENT (1 on an e2-micro, 2+ on an
+                                                   # Oracle A1 — the spare slot serves the editor's Run button).
       - key: DATABASE_URL
-        sync: false                                # paste your Render Postgres *Internal* Database URL
+        sync: false                                # Neon *direct* connection string (host WITHOUT "-pooler"),
+                                                   # ending in ?sslmode=require. Migrations use a session-level
+                                                   # advisory lock, which PgBouncer transaction pooling breaks.
       - key: REDIS_ADDR
-        sync: false                                # host:port of a Render Key Value (NOT a redis:// URL, NOT Upstash)
+        fromService:                               # internal redis://red-xxxx:6379 URL of the Key Value below;
+          type: keyvalue                           # the gateway accepts a redis:// URL or a bare host:port.
+          name: aether-redis                       # Internal connections need no password (private network).
+          property: connectionString
+      - key: EXECUTOR_ADDR
+        sync: false                                # <vm-ip-with-dashes>.sslip.io:443, e.g. 129-146-10-20.sslip.io:443
+      - key: EXECUTOR_TLS
+        value: "true"                              # TLS to Caddy on the VM, verified against public CAs
+      - key: EXECUTOR_AUTH_TOKEN
+        sync: false                                # same value as EXECUTOR_AUTH_TOKEN in the VM's infra/vm/.env
       - key: FRONTEND_ORIGIN
-        sync: false                                # your frontend's origin, e.g. https://aether.vercel.app
+        sync: false                                # exactly https://aether-judge.vercel.app — no trailing slash;
+                                                   # gates CORS and the WebSocket origin check
+
+  # Redis. Holds only rebuildable state (ADR-0004): the judge queue is
+  # reconciled from status='queued' rows in Postgres on startup, the
+  # leaderboard cache rebuilds from leaderboard_entries. So the free plan's
+  # lack of persistence (and its restarts) lose nothing.
+  - type: keyvalue
+    name: aether-redis
+    plan: free                                     # 25 MB, no persistence — plenty for a demo
+    region: oregon                                 # must match the gateway: internal hostnames resolve per region
+    ipAllowList: []                                # no external access at all; only Render services in the
+                                                   # same region/workspace can connect (unauthenticated, private)
+    maxmemoryPolicy: noeviction                    # never silently evict the judge stream; at 25 MB a write
+                                                   # fails loudly instead (queue is rebuildable from Postgres)

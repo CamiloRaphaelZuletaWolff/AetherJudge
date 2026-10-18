@@ -32,13 +32,20 @@ func (s *stubExecutor) Execute(ctx context.Context, req *executorv1.ExecuteReque
 	return s.execute(ctx, req)
 }
 
-// startBufconnServer serves a Server over an in-memory listener and returns
-// a connected client plus a shutdown function.
+// startBufconnServer serves a Server (authentication disabled) over an
+// in-memory listener and returns a connected client plus a shutdown function.
 func startBufconnServer(t *testing.T, executor executorv1.ExecutorServiceServer) (*grpc.ClientConn, func() error) {
+	t.Helper()
+	return startBufconnServerWithToken(t, executor, "")
+}
+
+// startBufconnServerWithToken is startBufconnServer with the executor's
+// bearer-token authentication configured.
+func startBufconnServerWithToken(t *testing.T, executor executorv1.ExecutorServiceServer, authToken string) (*grpc.ClientConn, func() error) {
 	t.Helper()
 
 	lis := bufconn.Listen(1 << 20)
-	srv := New("unused", discardLogger(), executor)
+	srv := New("unused", discardLogger(), executor, authToken)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -148,7 +155,7 @@ func TestPanicBecomesInternalError(t *testing.T) {
 func TestRunReturnsListenError(t *testing.T) {
 	t.Parallel()
 
-	srv := New("256.256.256.256:0", discardLogger(), okExecutor())
+	srv := New("256.256.256.256:0", discardLogger(), okExecutor(), "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -161,7 +168,7 @@ func TestRunReturnsListenError(t *testing.T) {
 func TestRunListensAndShutsDown(t *testing.T) {
 	t.Parallel()
 
-	srv := New("127.0.0.1:0", discardLogger(), okExecutor())
+	srv := New("127.0.0.1:0", discardLogger(), okExecutor(), "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

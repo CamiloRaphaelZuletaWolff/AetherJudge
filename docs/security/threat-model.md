@@ -154,9 +154,17 @@ Internal gRPC on a trusted network. The gateway **clamps** every resource
 request (timeouts, memory) to configured maxima before calling `Execute`, and a
 semaphore bounds executor concurrency, so a compromised or buggy gateway cannot
 ask the executor for unbounded resources. The hostile payload (user code)
-crosses here but is only ever handled inside a sandbox (Boundary 4). gRPC is not
-currently mTLS-secured — acceptable while both services share a private network;
-mTLS is the hardening step if that assumption ever breaks.
+crosses here but is only ever handled inside a sandbox (Boundary 4).
+
+When both services share a private network (Kubernetes, local dev) the channel
+is plaintext. When they do not — the free-tier deployment puts the executor on
+a public VM — the assumption is replaced by two controls: the executor rejects
+any RPC without `authorization: Bearer <EXECUTOR_AUTH_TOKEN>` (constant-time
+comparison; only the gRPC health service is exempt), and the gateway dials it
+over TLS (`EXECUTOR_TLS=true`) through Caddy with a Let's Encrypt certificate,
+with the executor's own port bound to loopback. A leaked token still grants
+only what the gateway has — sandboxed, clamped `Execute` calls. mTLS remains
+the stronger option if per-client identity is ever needed.
 
 ## Boundary 3 — Gateway → datastores
 
@@ -199,7 +207,8 @@ idempotent, so at-least-once queue redelivery cannot double-score.
 
 - WAF / DDoS protection at the edge (delegated to the hosting platform).
 - gVisor/Kata/microVM sandbox isolation (documented as the next hardening step).
-- mTLS between gateway and executor (private-network assumption).
+- mTLS between gateway and executor (a shared bearer token + server-side TLS
+  covers the public-VM deployment; see Boundary 2).
 - Multi-tenant secret management (KMS/Vault) — single-tenant portfolio scope.
 
 ## Summary of Phase 8 changes

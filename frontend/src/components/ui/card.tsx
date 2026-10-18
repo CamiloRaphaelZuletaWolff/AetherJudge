@@ -31,7 +31,10 @@ export function CardBody({ className, ...props }: HTMLAttributes<HTMLDivElement>
 
 export function ErrorNotice({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <Card className="flex flex-col items-center gap-3 p-6 text-center">
+    <Card
+      role="alert"
+      className="flex flex-col items-center gap-3 border-danger/20 bg-danger/5 p-6 text-center"
+    >
       <p className="text-sm text-danger">{message}</p>
       {onRetry && (
         <Button variant="secondary" size="sm" onClick={onRetry}>

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/input";
 import { ApiError, apiFetch } from "@/lib/api";
 import { authResponseSchema, type AuthResponse } from "@/lib/schemas";
+import { safeReturnPath } from "@/lib/navigation";
 import { useAuthStore } from "@/stores/auth";
 
 // Validation mirrors the backend's rules (internal/api/validate.go) so users
@@ -38,13 +39,14 @@ function useOnSignedIn() {
   return (resp: AuthResponse) => {
     signedIn(resp);
     const next = params.get("next");
-    router.replace(next && next.startsWith("/") ? next : "/dashboard");
+    router.replace(safeReturnPath(next));
   };
 }
 
 function FormError({ message, testid }: { message: string; testid?: string }) {
   return (
     <p
+      role="alert"
       data-testid={testid}
       className="flex items-center gap-2 rounded-[var(--radius)] border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger"
     >
@@ -81,6 +83,7 @@ export function SignupForm() {
     >
       <Field
         label="Username"
+        placeholder="Choose your contest handle"
         autoComplete="username"
         error={form.formState.errors.username?.message}
         {...form.register("username")}
@@ -88,6 +91,7 @@ export function SignupForm() {
       <Field
         label="Email"
         type="email"
+        placeholder="you@example.com"
         autoComplete="email"
         error={form.formState.errors.email?.message}
         {...form.register("email")}
@@ -96,6 +100,7 @@ export function SignupForm() {
         label="Password"
         type="password"
         autoComplete="new-password"
+        hint="8–72 characters. Use a password you don't use elsewhere."
         error={form.formState.errors.password?.message}
         {...form.register("password")}
       />

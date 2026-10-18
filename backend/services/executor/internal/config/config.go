@@ -6,13 +6,23 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
+
+// minAuthTokenLen rejects obviously guessable shared secrets. The deploy
+// docs generate 32 random bytes (43+ base64 chars).
+const minAuthTokenLen = 32
 
 // Config holds every runtime setting for the executor process.
 type Config struct {
 	// GRPCAddr is the listen address for the internal gRPC server, e.g. ":9090".
 	GRPCAddr string
+	// AuthToken is the shared secret every Execute call must carry as
+	// `authorization: Bearer <token>` metadata. Empty disables
+	// authentication (local dev, CI, in-cluster) — main logs a loud warning.
+	// Required whenever the gRPC port is reachable from the internet.
+	AuthToken string
 	// MetricsAddr is the listen address for the internal /metrics server.
 	MetricsAddr string
 	// LogLevel is one of debug, info, warn, error (validated by pkg/logging).
@@ -59,6 +69,7 @@ func Load() (Config, error) {
 		LogFormat:   getEnv("LOG_FORMAT", "json"),
 		DockerHost:  getEnv("EXECUTOR_DOCKER_HOST", ""),
 		ImageTag:    getEnv("EXECUTOR_IMAGE_TAG", "latest"),
+		AuthToken:   getEnv("EXECUTOR_AUTH_TOKEN", ""),
 	}
 
 	if cfg.GRPCAddr == "" {
@@ -72,6 +83,12 @@ func Load() (Config, error) {
 	}
 	if cfg.ImageTag == "" {
 		return Config{}, errors.New("config: EXECUTOR_IMAGE_TAG must not be empty")
+	}
+	if cfg.AuthToken != "" && len(cfg.AuthToken) < minAuthTokenLen {
+		return Config{}, fmt.Errorf("config: EXECUTOR_AUTH_TOKEN must be at least %d characters (or empty to disable auth)", minAuthTokenLen)
+	}
+	if strings.ContainsAny(cfg.AuthToken, " \t\r\n") {
+		return Config{}, errors.New("config: EXECUTOR_AUTH_TOKEN must not contain whitespace")
 	}
 
 	intFields := []struct {

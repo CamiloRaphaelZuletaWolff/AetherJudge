@@ -46,7 +46,7 @@ func TestTraceContextPropagatesAcrossGRPC(t *testing.T) {
 	}
 
 	lis := bufconn.Listen(1 << 20)
-	srv := New("unused", discardLogger(), stub)
+	srv := New("unused", discardLogger(), stub, "")
 	srvCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(srvCtx, lis) }()

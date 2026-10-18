@@ -154,6 +154,11 @@ spec:
               value: ":9090"
             - name: EXECUTOR_MAX_CONCURRENT
               value: {{ .Values.executor.maxConcurrent | quote }}
+            - name: EXECUTOR_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: EXECUTOR_AUTH_TOKEN
             - name: LOG_LEVEL
               valueFrom:
                 configMapKeyRef:

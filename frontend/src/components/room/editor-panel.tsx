@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, Send } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Check, Code2, Play, Send, Terminal } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 
@@ -41,10 +42,12 @@ export function EditorPanel({
   contestId,
   problemOrd,
   problemKey,
+  submissionDisabledReason,
 }: {
   contestId: string;
   problemOrd: number;
   problemKey: string;
+  submissionDisabledReason?: string;
 }) {
   const queryClient = useQueryClient();
   const { theme } = useTheme();
@@ -53,6 +56,7 @@ export function EditorPanel({
 
   const [stdin, setStdin] = useState("");
   const [runResult, setRunResult] = useState<RunResponse | null>(null);
+  const [basicEditor, setBasicEditor] = useState(false);
 
   const run = useMutation({
     mutationFn: () =>
@@ -80,14 +84,29 @@ export function EditorPanel({
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-1">
+        <h2 className="flex items-center gap-2 font-display text-sm font-semibold">
+          <Code2 className="size-4 text-primary" /> Solution{" "}
+          <span className="font-mono text-xs text-muted">P{problemOrd}</span>
+        </h2>
+        <span className="flex items-center gap-1.5 text-[11px] text-muted">
+          <Check className="size-3 text-primary" /> Draft saved on this device
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface p-2">
         <div className="relative">
           <select
             value={language}
-            onChange={(e) => setLanguage(languageSchema.parse(e.target.value))}
+            onChange={(e) => {
+              setLanguage(languageSchema.parse(e.target.value));
+              setRunResult(null);
+              run.reset();
+              submit.reset();
+            }}
             data-testid="language-select"
             aria-label="Language"
-            className="cursor-pointer rounded-[var(--radius)] border border-border-strong bg-surface-2 px-3 py-1.5 text-sm font-medium text-foreground outline-none focus:border-primary"
+            disabled={run.isPending || submit.isPending}
+            className="min-h-10 cursor-pointer rounded-[var(--radius)] border border-border-strong bg-surface-2 px-3 py-1.5 text-sm font-medium text-foreground outline-none focus:border-primary"
           >
             {(Object.keys(languageLabels) as Language[]).map((l) => (
               <option key={l} value={l}>
@@ -101,13 +120,19 @@ export function EditorPanel({
           <Button
             variant="secondary"
             loading={run.isPending}
-            onClick={() => run.mutate()}
+            disabled={!code.trim()}
+            onClick={() => {
+              setRunResult(null);
+              run.mutate();
+            }}
             data-testid="run-button"
           >
             {!run.isPending && <Play className="size-4" />} Run
           </Button>
           <Button
             loading={submit.isPending}
+            disabled={!!submissionDisabledReason || !code.trim()}
+            title={submissionDisabledReason ?? "Submit against the contest test cases"}
             onClick={() => submit.mutate()}
             data-testid="submit-button"
           >
@@ -116,28 +141,74 @@ export function EditorPanel({
         </div>
       </div>
 
-      <div className="min-h-[320px] flex-1 overflow-hidden rounded-[calc(var(--radius)+2px)] border border-border bg-surface">
-        <MonacoEditor
-          height="100%"
-          theme={theme === "dark" ? "vs-dark" : "light"}
-          language={monacoLanguage[language]}
-          value={code}
-          onChange={(value) => setDraft(problemKey, language, value ?? "")}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 14,
-            fontFamily: "var(--font-jetbrains-mono), monospace",
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            padding: { top: 12 },
-            tabSize: 4,
-          }}
-        />
+      {submissionDisabledReason && (
+        <p className="px-1 text-xs text-muted">
+          {submissionDisabledReason}. You can still edit and run code.
+        </p>
+      )}
+      <div className="overflow-hidden rounded-[calc(var(--radius)+2px)] border border-border bg-surface">
+        <div className="flex items-center justify-between border-b border-border bg-surface-2 px-3 py-2 text-[11px] text-muted">
+          <span className="font-mono">
+            solution.{language === "python" ? "py" : language === "cpp" ? "cpp" : "go"}
+          </span>
+          <button
+            type="button"
+            onClick={() => setBasicEditor(!basicEditor)}
+            className="cursor-pointer rounded px-2 py-1 text-primary hover:bg-primary/10"
+          >
+            {basicEditor ? "Use advanced editor" : "Use basic editor"}
+          </button>
+        </div>
+        <div className="h-[400px]">
+          {basicEditor ? (
+            <textarea
+              aria-label="Solution code"
+              value={code}
+              onChange={(event) => setDraft(problemKey, language, event.target.value)}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              className="h-full w-full resize-none bg-surface p-4 font-mono text-sm leading-relaxed text-foreground outline-none"
+            />
+          ) : (
+            <MonacoEditor
+              height="100%"
+              theme={theme === "dark" ? "vs-dark" : "light"}
+              language={monacoLanguage[language]}
+              value={code}
+              onChange={(value) => setDraft(problemKey, language, value ?? "")}
+              loading={
+                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                  <Spinner />
+                  <p className="text-sm text-muted">Loading your code editor…</p>
+                  <button
+                    type="button"
+                    onClick={() => setBasicEditor(true)}
+                    className="cursor-pointer rounded-lg border border-border px-3 py-2 text-xs text-primary hover:bg-primary/5"
+                  >
+                    Start writing in the basic editor
+                  </button>
+                </div>
+              }
+              options={{
+                minimap: { enabled: false },
+                fontSize: 14,
+                fontFamily: "var(--font-jetbrains-mono), monospace",
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                padding: { top: 12 },
+                tabSize: 4,
+              }}
+            />
+          )}
+        </div>
       </div>
 
-      <Card className="flex flex-col gap-2 p-3">
+      <Card className="flex flex-col gap-3 p-4">
         <label htmlFor="custom-stdin" className="text-xs font-medium text-muted">
-          Custom input (stdin) for Run
+          <span className="flex items-center gap-2">
+            <Terminal className="size-3.5" /> Test your solution
+          </span>
         </label>
         <Textarea
           id="custom-stdin"
@@ -145,8 +216,12 @@ export function EditorPanel({
           onChange={(e) => setStdin(e.target.value)}
           data-testid="stdin-input"
           rows={2}
-          placeholder="input piped to your program"
+          placeholder="Paste your test input here…"
         />
+        <p className="text-[11px] text-muted">
+          Run uses this input. Submit checks the contest&apos;s test cases and counts toward your
+          score.
+        </p>
       </Card>
 
       {submit.isError && (
@@ -159,7 +234,12 @@ export function EditorPanel({
         />
       )}
       {submit.isSuccess && (
-        <p className="text-sm text-muted" data-testid="submit-confirmation">
+        <p
+          role="status"
+          className="feedback-enter flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm text-primary"
+          data-testid="submit-confirmation"
+        >
+          <Check className="size-4 shrink-0" />
           Submitted — watch the verdict below.
         </p>
       )}
@@ -167,7 +247,7 @@ export function EditorPanel({
       {run.isError && <ErrorNotice message={run.error.message} />}
       {runResult && <RunOutput result={runResult} />}
 
-      <SubmissionsList contestId={contestId} />
+      <SubmissionsList contestId={contestId} problemOrd={problemOrd} />
     </div>
   );
 }
@@ -183,7 +263,7 @@ function RunOutput({ result }: { result: RunResponse }) {
   };
 
   return (
-    <Card className="flex flex-col gap-2 p-3" data-testid="run-output">
+    <Card role="status" className="feedback-enter flex flex-col gap-2 p-4" data-testid="run-output">
       <p className="text-xs font-medium text-muted">Run result: {statusLabel[result.status]}</p>
       {result.compile_output && (
         <pre className="overflow-x-auto rounded-md bg-surface-2 p-2 font-mono text-xs text-v-ce">
@@ -210,7 +290,8 @@ function RunOutput({ result }: { result: RunResponse }) {
   );
 }
 
-function SubmissionsList({ contestId }: { contestId: string }) {
+function SubmissionsList({ contestId, problemOrd }: { contestId: string; problemOrd: number }) {
+  const [onlyCurrent, setOnlyCurrent] = useState(false);
   const query = useQuery({
     queryKey: queryKeys.mySubmissions(contestId),
     queryFn: () =>
@@ -234,28 +315,60 @@ function SubmissionsList({ contestId }: { contestId: string }) {
     return <ErrorNotice message={query.error.message} onRetry={() => void query.refetch()} />;
   }
 
-  const submissions = query.data.submissions;
+  const submissions = query.data.submissions.filter(
+    (s) => !onlyCurrent || s.problem_ord === problemOrd,
+  );
   return (
     <Card className="overflow-hidden p-0" data-testid="my-submissions">
-      <h3 className="border-b border-border px-4 py-3 font-display text-sm font-semibold">
-        My submissions
-      </h3>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <h3 className="font-display text-sm font-semibold">
+          My submissions{" "}
+          <span className="ml-1 font-mono text-xs text-muted">{submissions.length}</span>
+        </h3>
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={onlyCurrent}
+            onChange={(e) => setOnlyCurrent(e.target.checked)}
+            className="accent-primary"
+          />
+          This problem
+        </label>
+      </div>
       {submissions.length === 0 ? (
-        <p className="px-4 py-5 text-center text-sm text-faint">Nothing submitted yet.</p>
+        <div className="px-4 py-8 text-center">
+          <Send className="mx-auto mb-2 size-5 text-faint" />
+          <p className="text-sm font-medium">Your next attempt starts here</p>
+          <p className="mt-1 text-xs text-muted">
+            Submit your solution to see its verdict and execution time.
+          </p>
+        </div>
       ) : (
-        <ul className="divide-y divide-border">
-          {submissions.map((s) => (
-            <li key={s.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-              <span className="font-mono text-xs text-faint">P{s.problem_ord}</span>
-              <span className="text-muted">{s.language}</span>
-              <span className="font-mono text-xs text-faint">
-                {new Date(s.submitted_at).toLocaleTimeString()}
-              </span>
-              <span className="ml-auto">
-                <VerdictBadge submission={s} />
-              </span>
-            </li>
-          ))}
+        <ul
+          className="max-h-80 overflow-y-auto divide-y divide-border"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
+          <AnimatePresence initial={false}>
+            {submissions.map((s) => (
+              <motion.li
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.18 }}
+                key={s.id}
+                className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm"
+              >
+                <span className="font-mono text-xs text-faint">P{s.problem_ord}</span>
+                <span className="text-muted">{s.language}</span>
+                <span className="font-mono text-xs text-faint">
+                  {new Date(s.submitted_at).toLocaleTimeString()}
+                </span>
+                <span className="ml-auto">
+                  <VerdictBadge submission={s} />
+                </span>
+              </motion.li>
+            ))}
+          </AnimatePresence>
         </ul>
       )}
     </Card>

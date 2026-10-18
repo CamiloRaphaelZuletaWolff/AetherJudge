@@ -77,7 +77,16 @@ func run() error {
 		"metrics_addr", cfg.MetricsAddr,
 		"max_concurrent", cfg.MaxConcurrent,
 		"image_tag", cfg.ImageTag,
+		"auth_enabled", cfg.AuthToken != "",
 	)
+	if cfg.AuthToken == "" {
+		// Not fatal: local dev, CI and the kind cluster run the executor on
+		// a private network. On any internet-reachable host this would be an
+		// open remote-code-execution endpoint.
+		log.Warn("EXECUTOR_AUTH_TOKEN is empty: gRPC authentication is DISABLED. " +
+			"Anyone who can reach " + cfg.GRPCAddr + " can run code on this host. " +
+			"Set EXECUTOR_AUTH_TOKEN before exposing the executor beyond a private network.")
+	}
 
 	// gRPC and the internal /metrics listener run together; a failure of
 	// either (e.g. a busy port at startup) brings both down so the process
@@ -87,7 +96,7 @@ func run() error {
 
 	svc := service.New(engine, cfg, log)
 	srvErrs := make(chan error, 2)
-	go func() { srvErrs <- grpcserver.New(cfg.GRPCAddr, log, svc).Run(srvCtx) }()
+	go func() { srvErrs <- grpcserver.New(cfg.GRPCAddr, log, svc, cfg.AuthToken).Run(srvCtx) }()
 	go func() { srvErrs <- metricsserver.New(cfg.MetricsAddr, log).Run(srvCtx) }()
 
 	var firstErr error

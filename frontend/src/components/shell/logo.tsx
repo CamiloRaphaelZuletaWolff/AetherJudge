@@ -10,10 +10,12 @@ export function Logo({ href = "/dashboard", className }: { href?: string; classN
       className={cn("group inline-flex items-center gap-2.5 outline-none", className)}
       aria-label="Aether Judge home"
     >
-      <span className="grid size-8 place-items-center rounded-[var(--radius)] bg-gradient-to-br from-primary to-emerald-600 font-display text-sm font-bold text-primary-foreground shadow-sm transition-transform group-hover:scale-105">
+      <span className="grid size-8 shrink-0 place-items-center rounded-[var(--radius)] bg-primary font-display text-sm font-bold text-primary-foreground shadow-sm">
         AJ
       </span>
-      <span className="font-display text-lg font-semibold tracking-tight">Aether Judge</span>
+      <span className="whitespace-nowrap font-display text-lg font-semibold tracking-tight">
+        Aether Judge
+      </span>
     </Link>
   );
 }

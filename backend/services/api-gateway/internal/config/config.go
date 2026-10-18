@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -37,6 +38,13 @@ type Config struct {
 	RedisAddr string
 	// ExecutorAddr is the executor gRPC host:port.
 	ExecutorAddr string
+	// ExecutorAuthToken is the shared secret sent to the executor as
+	// `authorization: Bearer <token>` on every RPC. Empty sends nothing
+	// (local dev / in-cluster executors with auth disabled).
+	ExecutorAuthToken string
+	// ExecutorTLS dials the executor over TLS (system root CAs) instead of
+	// plaintext — required when it sits behind a public TLS proxy.
+	ExecutorTLS bool
 
 	// JWTSecret signs access tokens (HS256).
 	JWTSecret string
@@ -86,6 +94,8 @@ func Load() (Config, error) {
 		JWTSecret:      getEnv("JWT_SECRET", devJWTSecret),
 		FrontendOrigin: getEnv("FRONTEND_ORIGIN", "http://localhost:3000"),
 		ConsumerName:   getEnv("CONSUMER_NAME", "gateway"),
+		// Never defaulted: an empty token means "send no auth header".
+		ExecutorAuthToken: getEnv("EXECUTOR_AUTH_TOKEN", ""),
 	}
 
 	intFields := []struct {
@@ -107,6 +117,12 @@ func Load() (Config, error) {
 		}
 		*f.dst = v
 	}
+
+	executorTLS, err := getEnvBool("EXECUTOR_TLS", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.ExecutorTLS = executorTLS
 
 	accessMin, err := getEnvInt("ACCESS_TOKEN_TTL_MIN", 15)
 	if err != nil {
@@ -163,6 +179,12 @@ func (c Config) validate() error {
 		}
 	}
 
+	// A pasted token with a stray space/newline would never match the
+	// executor's and fail every judge call with a confusing Unauthenticated.
+	if strings.ContainsAny(c.ExecutorAuthToken, " \t\r\n") {
+		return errors.New("config: EXECUTOR_AUTH_TOKEN must not contain whitespace")
+	}
+
 	if c.IsProduction() && (c.UsingWeakJWTSecret() || len(c.JWTSecret) < 32) {
 		return errors.New("config: production requires JWT_SECRET set to a strong value (>= 32 chars)")
 	}
@@ -199,6 +221,18 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getEnvBool(key string, fallback bool) (bool, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("config: %s must be a boolean (true/false), got %q", key, v)
+	}
+	return b, nil
 }
 
 func getEnvInt(key string, fallback int) (int, error) {

@@ -149,6 +149,8 @@ function ProblemRow({ contestId, problem }: { contestId: string; problem: AdminP
     <Card className="overflow-hidden p-0">
       <button
         type="button"
+        aria-expanded={open}
+        aria-controls={`problem-details-${problem.id}`}
         onClick={() => setOpen((v) => !v)}
         className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-foreground/5"
       >
@@ -175,9 +177,10 @@ function ProblemRow({ contestId, problem }: { contestId: string; problem: AdminP
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            id={`problem-details-${problem.id}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{ duration: 0.22, ease: easeMove }}
             className="overflow-hidden"
           >

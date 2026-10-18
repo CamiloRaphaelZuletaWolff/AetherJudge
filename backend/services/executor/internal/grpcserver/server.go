@@ -1,6 +1,6 @@
 // Package grpcserver hosts the executor's gRPC endpoint: the ExecutorService
-// implementation plus the standard gRPC health protocol, with logging and
-// panic-recovery interceptors.
+// implementation plus the standard gRPC health protocol, with logging,
+// panic-recovery and bearer-token authentication interceptors.
 package grpcserver
 
 import (
@@ -29,7 +29,14 @@ type Server struct {
 // New assembles a Server serving the ExecutorService implementation and the
 // gRPC health protocol (the empty service name covers the whole process,
 // which is what generic health probes target).
-func New(addr string, log *slog.Logger, executor executorv1.ExecutorServiceServer) *Server {
+//
+// authToken is the shared secret callers must present as
+// `authorization: Bearer <token>` metadata. Empty disables authentication —
+// acceptable only on a private network (local dev, CI, in-cluster); the
+// executor's main logs a loud warning in that case. Health checks are always
+// open.
+func New(addr string, log *slog.Logger, executor executorv1.ExecutorServiceServer, authToken string) *Server {
+	authz := newTokenAuthorizer(authToken)
 	grpcSrv := grpc.NewServer(
 		// Server spans continuing the gateway's trace context (no-op when
 		// tracing is disabled).
@@ -37,7 +44,11 @@ func New(addr string, log *slog.Logger, executor executorv1.ExecutorServiceServe
 		grpc.ChainUnaryInterceptor(
 			recoveryInterceptor(log),
 			loggingInterceptor(log),
+			// After logging, so rejected calls still produce a log line
+			// (code=Unauthenticated) — useful when probing is suspected.
+			authUnaryInterceptor(authz),
 		),
+		grpc.ChainStreamInterceptor(authStreamInterceptor(authz)),
 	)
 
 	executorv1.RegisterExecutorServiceServer(grpcSrv, executor)
