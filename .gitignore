@@ -55,3 +55,17 @@ infra/terraform/local/*-config
 *.swp
 .DS_Store
 Thumbs.db
+
+# --- Agent tooling (not part of the product) ---
+skills-lock.json
+
+# --- Keys / dumps ---
+*.pem
+*.key
+*.p12
+*.dump
+
+# --- Local test output / deploy ---
+**/test-results/
+**/playwright-report/
+.vercel/

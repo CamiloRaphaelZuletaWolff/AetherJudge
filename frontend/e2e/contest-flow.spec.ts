@@ -12,9 +12,11 @@ function uniqueUser(prefix: string): string {
 async function signup(page: Page, username: string): Promise<void> {
   await page.goto("/auth");
   await page.getByRole("tab", { name: "Sign up" }).click();
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Email").fill(`${username}@example.com`);
-  await page.getByLabel("Password").fill(PASSWORD);
+  // exact: the password field now has a "Show password" toggle whose
+  // accessible name would otherwise also match getByLabel("Password").
+  await page.getByLabel("Username", { exact: true }).fill(username);
+  await page.getByLabel("Email", { exact: true }).fill(`${username}@example.com`);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
   await page.getByTestId("signup-submit").click();
   await expect(page.getByTestId("current-user")).toHaveText(username);
 }

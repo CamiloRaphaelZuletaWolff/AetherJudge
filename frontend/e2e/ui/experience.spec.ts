@@ -119,7 +119,9 @@ test("landing demonstrates a real row climb and honors reduced motion", async ({
     "true",
   );
   await expect(rows.first()).toHaveAttribute("data-competitor", "hello_world");
-  await expect(page.getByRole("status")).toContainText("climbs 2 places");
+  // The page has other live regions (e.g. the server-wake notice), so pick
+  // the scoreboard's announcement by its content.
+  await expect(page.getByRole("status").filter({ hasText: "climbs 2 places" })).toBeVisible();
   const positions = await movement;
   expect(new Set(positions.map(Math.round)).size).toBeGreaterThan(4);
   expect(positions[0]! - positions.at(-1)!).toBeGreaterThan(100);

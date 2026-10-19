@@ -18,3 +18,6 @@ overrides:
   "source-map-js@<1.2.2": ^1.2.2
   "browserslist@<4.29.3": ^4.29.3
   "baseline-browser-mapping@<2.11.29": ^2.11.29
+  # next 15 pins sharp 0.34.x (librsvg/libvips advisories, fixed in 0.35.5).
+  # sharp only backs next/image optimization; the 0.35 API used by next is unchanged.
+  "sharp@<0.35.5": ^0.35.5
