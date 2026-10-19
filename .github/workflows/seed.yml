@@ -1,8 +1,19 @@
-# Loads the demo data (users alice/bob/carol with password "password123", the
-# "Arena Demo Contest" and its problems) into the production database.
+# Loads the demo data (the "Arena Demo Contest" with its problems and hidden
+# test cases, plus one account per role) into the production database.
+#
+#   bob    role user       password "password123" - the PUBLIC demo login
+#   alice  role admin      password = secret DEMO_ADMIN_PASSWORD (never published)
+#   carol  role moderator  password = secret DEMO_MODERATOR_PASSWORD
+#                          (falls back to DEMO_ADMIN_PASSWORD when unset)
+#
+# The privileged accounts never get the public password here: a moderator can
+# read hidden test cases and an admin can change anyone's role, so publishing
+# their credentials would hand the live demo to anyone. Re-running this
+# workflow also RESETS alice's/carol's passwords to the secrets and revokes
+# their sessions - use it to rotate them.
 #
 # Why a workflow: Render's free plan has no shell, so this is the "no-shell
-# ops" path — it runs the same `go run ./cmd/seed` you would run locally,
+# ops" path - it runs the same `go run ./cmd/seed` you would run locally,
 # from a GitHub runner, against Neon.
 #
 # Safe to re-run (idempotent). cmd/seed applies the embedded migrations
@@ -10,8 +21,11 @@
 # It refuses APP_ENV=production, hence APP_ENV=dev below: that only affects
 # this one-off process, not the deployed gateway.
 #
-# Secret required: NEON_DATABASE_URL — the Neon *direct* (non-pooled)
-# connection string, ending in ?sslmode=require.
+# Secrets required:
+#   NEON_DATABASE_URL        the Neon *direct* (non-pooled) connection string,
+#                            ending in ?sslmode=require
+#   DEMO_ADMIN_PASSWORD      12-72 characters, e.g. `openssl rand -base64 24`
+#   DEMO_MODERATOR_PASSWORD  optional, same rules
 name: Seed demo data
 
 on:
@@ -35,18 +49,25 @@ jobs:
     runs-on: ubuntu-24.04
     if: inputs.confirm == 'seed'
     steps:
-      - name: Check secret
+      - name: Check secrets
         env:
           DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          DEMO_ADMIN_PASSWORD: ${{ secrets.DEMO_ADMIN_PASSWORD }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
             echo "::error::Repository secret NEON_DATABASE_URL is not set."
             exit 1
           fi
+          if [ -z "$DEMO_ADMIN_PASSWORD" ]; then
+            echo "::error::Repository secret DEMO_ADMIN_PASSWORD is not set (the admin/moderator demo accounts must not use the public password)."
+            exit 1
+          fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: backend/go.work
           cache-dependency-path: backend/**/go.sum
@@ -57,4 +78,8 @@ jobs:
           APP_ENV: dev
           LOG_LEVEL: info
           DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          DEMO_ADMIN_PASSWORD: ${{ secrets.DEMO_ADMIN_PASSWORD }}
+          DEMO_MODERATOR_PASSWORD: ${{ secrets.DEMO_MODERATOR_PASSWORD }}
+          # Fail instead of falling back to the public demo password.
+          SEED_REQUIRE_PRIVATE_PASSWORDS: "true"
         run: go run ./cmd/seed

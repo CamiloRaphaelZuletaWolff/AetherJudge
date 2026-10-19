@@ -12,8 +12,15 @@
 #   VM_HOST              public IP (or sslip.io name) of the VM
 #   VM_USER              SSH user: "ubuntu" on Oracle, your login on Google Cloud
 #   VM_SSH_KEY           the PRIVATE key (whole file, including BEGIN/END lines)
-#   VM_SSH_KNOWN_HOSTS   optional: output of `ssh-keyscan -t ed25519 <VM_HOST>`;
-#                        without it the host key is trusted on first use
+#   VM_SSH_KNOWN_HOSTS   REQUIRED: the VM's SSH host key line(s), "<VM_HOST> <type> <key>".
+#                        Best: read it ON the VM (Oracle web console / an SSH
+#                        session whose fingerprint you verified):
+#                          cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub
+#                        and prefix it with the VM_HOST value. Acceptable for a
+#                        demo: run `ssh-keyscan -t ed25519 <VM_HOST>` once from
+#                        your own PC. The deploy refuses to run without it:
+#                        re-scanning the key on every run would let anyone who
+#                        can intercept the runner's traffic impersonate the VM.
 # While VM_HOST is unset the job is skipped with a notice, so the automatic
 # trigger never fails before the VM exists.
 name: Deploy executor
@@ -40,7 +47,15 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to VM
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # workflow_run: only a successful images build of a push to THIS repo's
+    # main (the `branches` filter matches by name alone, which a fork's
+    # "main" also carries).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     env:
       VM_HOST: ${{ secrets.VM_HOST }}
@@ -72,19 +87,21 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_vm
           chmod 600 ~/.ssh/id_vm
-          if [ -n "$VM_SSH_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$VM_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            echo "::warning::VM_SSH_KNOWN_HOSTS not set - trusting the host key on first use."
-            ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$VM_HOST" > ~/.ssh/known_hosts
+          # Fail closed: never trust whatever host key answers on this run.
+          if [ -z "$VM_SSH_KNOWN_HOSTS" ]; then
+            echo "::error::Repository secret VM_SSH_KNOWN_HOSTS is not set (see the header of deploy-executor.yml). Refusing to deploy over an unverified SSH connection."
+            exit 1
           fi
+          printf '%s\n' "$VM_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
       - name: Pull repo and run deploy.sh on the VM
         if: steps.cfg.outputs.skip == 'false'
         env:
           TAG: ${{ steps.cfg.outputs.tag }}
         run: |
-          ssh -i ~/.ssh/id_vm -o IdentitiesOnly=yes -o ServerAliveInterval=30 \
+          ssh -i ~/.ssh/id_vm -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
             "$VM_USER@$VM_HOST" bash -s -- "$TAG" <<'REMOTE'
           set -euo pipefail
           tag="$1"

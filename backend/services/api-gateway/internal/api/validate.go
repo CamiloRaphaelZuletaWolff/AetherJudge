@@ -13,6 +13,9 @@ const (
 	maxBodyBytes = 2 * 1024 * 1024
 	// maxAuthBodyBytes caps auth payloads, which are tiny by nature.
 	maxAuthBodyBytes = 4 * 1024
+	// maxContestDescriptionBytes caps a contest description. The admin form
+	// allows 2000 characters; 8 KiB leaves room for multi-byte UTF-8.
+	maxContestDescriptionBytes = 8 * 1024
 	// maxStatementBytes caps a problem statement (markdown).
 	maxStatementBytes = 64 * 1024
 	// maxTestCaseFieldBytes caps each side of a test case (stdin / expected).
@@ -95,6 +98,13 @@ func validateContestTitle(title string) *requestError {
 	n := len(strings.TrimSpace(title))
 	if n < 1 || len(title) > 200 {
 		return badRequest("title must be between 1 and 200 characters")
+	}
+	return nil
+}
+
+func validateContestDescription(description string) *requestError {
+	if len(description) > maxContestDescriptionBytes {
+		return badRequest("description exceeds %d bytes", maxContestDescriptionBytes)
 	}
 	return nil
 }

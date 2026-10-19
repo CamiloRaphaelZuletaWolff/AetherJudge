@@ -123,7 +123,7 @@ task tools:install        # pinned dev tools (buf, protoc plugins, golangci-lint
 task env:init             # local .env files from examples (generates a JWT secret)
 task executor:images      # build the sandbox images for the judge
 task infra:up             # PostgreSQL + Redis, waits until healthy
-task db:seed              # demo contest + accounts (alice / bob : password123)
+task db:seed              # demo contest + accounts alice (admin) / carol (moderator) / bob (user), all password123 LOCALLY
 
 task executor:run         # terminal 1 — gRPC server on :9090
 task gateway:run          # terminal 2 — HTTP/WebSocket on :8080
@@ -131,10 +131,16 @@ task gateway:run          # terminal 2 — HTTP/WebSocket on :8080
 cd frontend && pnpm install && pnpm dev    # terminal 3 — http://localhost:3000
 ```
 
-Open <http://localhost:3000>, sign in as `alice` (`password123`), enter the
+Open <http://localhost:3000>, sign in as `alice` (`password123`, local only), enter the
 **Arena Demo Contest**, and submit a solution — the verdict and leaderboard
 update live. Open a second incognito window as `bob` to watch real-time
 multiplayer updates.
+
+> **Public deployments:** `password123` is for local machines only. On a live
+> demo, only the unprivileged `bob` account uses it; the seed workflow gives
+> `alice` (admin) and `carol` (moderator) private passwords from the
+> `DEMO_ADMIN_PASSWORD` / `DEMO_MODERATOR_PASSWORD` secrets — never publish
+> those (see [DEPLOY.md §8](DEPLOY.md#8-datos-de-demo-seed-con-github-actions)).
 
 > The stack runs entirely on dev defaults (no external accounts or
 > credentials). `task env:init` materializes the knobs into gitignored

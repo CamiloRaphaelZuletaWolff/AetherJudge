@@ -24,6 +24,16 @@ import (
 // dockerConnectTimeout bounds the startup ping to the Docker daemon.
 const dockerConnectTimeout = 10 * time.Second
 
+// janitorInterval is how often leaked sandbox containers are swept.
+const janitorInterval = 5 * time.Minute
+
+// staleSandboxAge is the age past which a sandbox container is certainly
+// abandoned: well beyond the longest legitimate execution (compile + the
+// maximum run timeout), with slack for a slow daemon.
+func staleSandboxAge(cfg config.Config) time.Duration {
+	return 2*(cfg.CompileTimeout+cfg.RunTimeoutMax) + 5*time.Minute
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "executor:", err)
@@ -71,6 +81,12 @@ func run() error {
 			log.Warn("close sandbox engine", "error", err)
 		}
 	}()
+
+	// Remove sandboxes a previous crash left behind, then keep sweeping so
+	// leaks can never pile up into a resource-exhaustion DoS.
+	janitorCtx, stopJanitor := context.WithCancel(ctx)
+	defer stopJanitor()
+	go engine.RunJanitor(janitorCtx, janitorInterval, staleSandboxAge(cfg))
 
 	log.Info("starting executor",
 		"grpc_addr", cfg.GRPCAddr,

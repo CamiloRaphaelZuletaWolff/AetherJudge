@@ -45,6 +45,9 @@ deltas added in Phase 8. The full analysis is in
    spoofable, so we accept the degradation and document a configurable
    trusted-proxy-hop mitigation as future work rather than ship a spoofable one.
    Per-user limits on the expensive (sandbox-consuming) routes are unaffected.
+   *Update:* resolved with `TRUSTED_PROXY_HOPS` (default 0 = TCP peer; Render
+   sets 1), which reads the N-th `X-Forwarded-For` entry from the right — the
+   one appended by the outermost trusted proxy, never a client-supplied one.
 
 5. **Supply-chain gates in CI.** Add `govulncheck` (Go), `pnpm audit`
    (frontend), Trivy (container images), and gitleaks (secret scanning) as CI

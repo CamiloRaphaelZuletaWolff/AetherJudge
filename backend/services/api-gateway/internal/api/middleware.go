@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -159,9 +160,55 @@ func (s *server) rateLimited(scope string, perMin int, keyFn func(*http.Request)
 	}
 }
 
-// byIP keys rate limits on the client IP (no proxy in front during MVP;
-// X-Forwarded-For handling arrives with the ingress in Phase 5).
-func byIP(r *http.Request) string {
+// byIP keys rate limits on the client IP (see clientIP).
+func (s *server) byIP(r *http.Request) string {
+	return s.clientIP(r)
+}
+
+// byUser keys rate limits on the authenticated user; falls back to IP.
+func (s *server) byUser(r *http.Request) string {
+	if u, ok := UserFrom(r.Context()); ok {
+		return u.ID.String()
+	}
+	return s.clientIP(r)
+}
+
+// clientIP returns the address per-IP rate limits key on.
+//
+// With TRUSTED_PROXY_HOPS=0 (the default) it is the TCP peer. Behind a
+// reverse proxy (Render, an ingress) the peer is the proxy, so every client
+// would share ONE bucket — a single abuser could lock everyone out of login.
+// Behind N trusted proxies that each append the address they received the
+// request from to X-Forwarded-For, the real client is the Nth entry from the
+// RIGHT. Entries further left were supplied by the client itself and are
+// spoofable, so they are never used; a malformed or too-short chain falls
+// back to the TCP peer.
+func (s *server) clientIP(r *http.Request) string {
+	peer := remoteHost(r)
+	hops := s.cfg.TrustedProxyHops
+	if hops <= 0 {
+		return peer
+	}
+
+	var chain []string
+	for _, header := range r.Header.Values("X-Forwarded-For") {
+		for _, part := range strings.Split(header, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				chain = append(chain, p)
+			}
+		}
+	}
+	if len(chain) < hops {
+		return peer
+	}
+	candidate := chain[len(chain)-hops]
+	if net.ParseIP(candidate) == nil {
+		return peer
+	}
+	return candidate
+}
+
+func remoteHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -169,10 +216,40 @@ func byIP(r *http.Request) string {
 	return host
 }
 
-// byUser keys rate limits on the authenticated user; falls back to IP.
-func byUser(r *http.Request) string {
-	if u, ok := UserFrom(r.Context()); ok {
-		return u.ID.String()
+// maxWSConnsPerUser caps concurrent WebSocket connections one account may
+// hold on this process. Each connection costs a goroutine pair and a hub
+// slot; without a cap a single token could open thousands.
+const maxWSConnsPerUser = 8
+
+// connLimiter counts live connections per user.
+type connLimiter struct {
+	mu    sync.Mutex
+	max   int
+	count map[uuid.UUID]int
+}
+
+func newConnLimiter(maxPerUser int) *connLimiter {
+	return &connLimiter{max: maxPerUser, count: make(map[uuid.UUID]int)}
+}
+
+// acquire reserves a slot for id, reporting false when the user is at the cap.
+func (l *connLimiter) acquire(id uuid.UUID) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.count[id] >= l.max {
+		return false
 	}
-	return byIP(r)
+	l.count[id]++
+	return true
+}
+
+// release frees a slot taken by acquire.
+func (l *connLimiter) release(id uuid.UUID) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.count[id] <= 1 {
+		delete(l.count, id)
+		return
+	}
+	l.count[id]--
 }

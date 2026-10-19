@@ -42,6 +42,8 @@ type server struct {
 
 	// wsOriginPatterns is derived from FrontendOrigin for websocket.Accept.
 	wsOriginPatterns []string
+	// wsConns caps concurrent WebSocket connections per user.
+	wsConns *connLimiter
 }
 
 // NewRouter assembles the full public HTTP surface.
@@ -56,6 +58,7 @@ func NewRouter(d Deps) http.Handler {
 		judge:    d.Judge,
 		hub:      d.Hub,
 		executor: d.Executor,
+		wsConns:  newConnLimiter(maxWSConnsPerUser),
 	}
 	if u, err := url.Parse(d.Cfg.FrontendOrigin); err == nil && u.Host != "" {
 		s.wsOriginPatterns = []string{u.Host}
@@ -69,9 +72,11 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("GET /readyz", s.readyz)
 
 	// Auth (IP rate-limited: these are the credential-guessing surface).
-	mux.HandleFunc("POST /api/v1/auth/signup", s.rateLimited("auth", s.cfg.AuthRatePerMin, byIP, s.signup))
-	mux.HandleFunc("POST /api/v1/auth/login", s.rateLimited("auth", s.cfg.AuthRatePerMin, byIP, s.login))
-	mux.HandleFunc("POST /api/v1/auth/refresh", s.rateLimited("auth", s.cfg.AuthRatePerMin, byIP, s.refreshToken))
+	// Refresh has its own bucket so login attempts from a shared IP cannot
+	// starve silent session renewal (and vice versa).
+	mux.HandleFunc("POST /api/v1/auth/signup", s.rateLimited("auth", s.cfg.AuthRatePerMin, s.byIP, s.signup))
+	mux.HandleFunc("POST /api/v1/auth/login", s.rateLimited("auth", s.cfg.AuthRatePerMin, s.byIP, s.login))
+	mux.HandleFunc("POST /api/v1/auth/refresh", s.rateLimited("refresh", s.cfg.AuthRatePerMin, s.byIP, s.refreshToken))
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/me", s.requireAuth(s.me))
 
@@ -85,11 +90,11 @@ func NewRouter(d Deps) http.Handler {
 	// Submissions and ad-hoc runs (user rate-limited: each one costs a
 	// sandbox).
 	mux.HandleFunc("POST /api/v1/contests/{id}/problems/{ord}/submissions",
-		s.requireAuth(s.rateLimited("submit", s.cfg.SubmitRatePerMin, byUser, s.createSubmission)))
+		s.requireAuth(s.rateLimited("submit", s.cfg.SubmitRatePerMin, s.byUser, s.createSubmission)))
 	mux.HandleFunc("GET /api/v1/submissions/{id}", s.requireAuth(s.getSubmission))
 	mux.HandleFunc("GET /api/v1/contests/{id}/submissions", s.requireAuth(s.listMySubmissions))
 	mux.HandleFunc("POST /api/v1/run",
-		s.requireAuth(s.rateLimited("run", s.cfg.RunRatePerMin, byUser, s.runCode)))
+		s.requireAuth(s.rateLimited("run", s.cfg.RunRatePerMin, s.byUser, s.runCode)))
 
 	// Admin / moderator surface. Every route is requireAuth + requirePermission
 	// — the real authorization boundary (the frontend's gating is UX only;

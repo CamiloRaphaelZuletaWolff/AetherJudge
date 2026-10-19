@@ -78,8 +78,20 @@ func parseCSVCases(data []byte) ([]importCase, error) {
 	return out, nil
 }
 
+// xlsxUnzipLimit and xlsxUnzipXMLLimit bound how much an uploaded .xlsx
+// (a zip archive) may decompress to. excelize's defaults (16 GB total) would
+// let a few-KB zip bomb exhaust the gateway's memory; real test-case sheets
+// are at most a few MB uncompressed.
+const (
+	xlsxUnzipLimit    = 64 << 20
+	xlsxUnzipXMLLimit = 32 << 20
+)
+
 func parseXLSXCases(data []byte) ([]importCase, error) {
-	f, err := excelize.OpenReader(bytes.NewReader(data))
+	f, err := excelize.OpenReader(bytes.NewReader(data), excelize.Options{
+		UnzipSizeLimit:    xlsxUnzipLimit,
+		UnzipXMLSizeLimit: xlsxUnzipXMLLimit,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("invalid XLSX: %w", err)
 	}

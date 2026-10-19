@@ -134,7 +134,7 @@ Herramientas locales (en tu PC):
 
 - **Git** y un terminal (PowerShell en Windows).
 - **OpenSSH** (`ssh`, `ssh-keygen`) — Windows 10/11 ya lo trae.
-- *(Opcional)* **Go 1.26.4+**, solo si quieres ejecutar el seed localmente en
+- *(Opcional)* **Go 1.26.9+**, solo si quieres ejecutar el seed localmente en
   lugar de con GitHub Actions.
 
 ---
@@ -170,6 +170,11 @@ Lo pegarás **en dos sitios** (idéntico, byte a byte):
 El `JWT_SECRET` de la API **no** lo generas tú: Render lo crea solo
 (`generateValue: true` en `render.yaml`).
 
+Genera también (mismo comando) la **contraseña del admin de demo**
+`DEMO_ADMIN_PASSWORD` (y, si quieres otra distinta para el moderador,
+`DEMO_MODERATOR_PASSWORD`): entre 12 y 72 caracteres. Solo va a los secretos de
+GitHub (sección 10) y **nunca** se publica — ver la sección 8.
+
 Además crearás una **clave SSH** para entrar a la VM (sección 4.4).
 
 > Nunca subas estos valores al repositorio. `.env` y `infra/vm/.env` están en
@@ -182,6 +187,7 @@ Abre una nota y ve rellenando:
 | Nombre | De dónde sale | Ejemplo |
 | --- | --- | --- |
 | `EXECUTOR_AUTH_TOKEN` | Sección 2 | `9f2c…` (64 hex) |
+| `DEMO_ADMIN_PASSWORD` | Sección 2 (privada, no la publiques) | `3b1e…` |
 | `NEON_DATABASE_URL` | Neon, sección 3 | `postgresql://neondb_owner:…@ep-cool-name-a1b2c3d4.us-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require` |
 | `VM_IP` | Oracle/Google, sección 4/5 | `129.146.10.20` |
 | `EXECUTOR_DOMAIN` | `VM_IP` con guiones + `.sslip.io` | `129-146-10-20.sslip.io` |
@@ -440,6 +446,22 @@ IMAGE_TAG=latest
 Guarda con `Ctrl+O`, `Enter`, y sal con `Ctrl+X`. Protégelo:
 `chmod 600 ~/aether/infra/vm/.env`.
 
+> **Seguridad de la VM (léelo una vez):**
+>
+> - El usuario `ubuntu` está en el grupo `docker`, y el contenedor del executor
+>   monta `/var/run/docker.sock`: **ambos equivalen a root** en la VM. Quien
+>   tenga tu clave SSH (o el secreto `VM_SSH_KEY` de GitHub) controla la VM
+>   entera. Usa una clave exclusiva para esta VM y bórrala de GitHub si dejas de
+>   usar el despliegue automático.
+> - Las imágenes de Oracle ya traen `PasswordAuthentication no` (solo claves).
+>   Compruébalo con `sudo sshd -T | grep -Ei 'passwordauth|permitrootlogin'`
+>   (espera `passwordauthentication no` y `permitrootlogin no` o
+>   `without-password`).
+> - Deja abiertos **solo** 22, 80 y 443 en la Security List. El puerto 9090 del
+>   executor escucha solo en `127.0.0.1`.
+> - Activa las actualizaciones automáticas de seguridad:
+>   `sudo apt-get install -y unattended-upgrades` (Ubuntu ya suele traerlo).
+
 ### 4.9 Desplegar (`deploy.sh`)
 
 > **Antes:** las imágenes deben existir en GHCR y ser públicas
@@ -655,9 +677,15 @@ entra por SSH a la VM, actualiza `~/aether` y ejecuta `deploy.sh`:
 - **Manual:** Actions → **Deploy executor** → **Run workflow** → `image_tag`
   (`latest` o un sha corto para volver atrás).
 
-Necesita los secretos `VM_HOST`, `VM_USER`, `VM_SSH_KEY`
-([sección 10](#10-secretos-de-github)). Mientras no existan, el job se salta con
-un aviso (no falla).
+Necesita los secretos `VM_HOST`, `VM_USER`, `VM_SSH_KEY` y
+`VM_SSH_KNOWN_HOSTS` ([sección 10](#10-secretos-de-github)). Mientras
+`VM_HOST`/`VM_USER` no existan, el job se salta con un aviso (no falla). Si
+existen pero falta `VM_SSH_KNOWN_HOSTS`, el job **falla a propósito**: sin la
+huella de la VM, cualquiera que intercepte la conexión del runner podría hacerse
+pasar por ella.
+
+El disparo automático solo ocurre tras un *push* a `main` de **este**
+repositorio (nunca desde forks).
 
 ---
 
@@ -714,6 +742,7 @@ Todo lo demás lo fija `render.yaml`:
 | `JUDGE_WORKERS` | `1` | Consumidores de la cola dentro del mismo proceso; cabe en 512 MB y nunca supera `EXECUTOR_MAX_CONCURRENT` |
 | `REDIS_ADDR` | `fromService` → `connectionString` de `aether-redis` | URL interna `redis://red-xxxx:6379`; sin contraseña (red privada) |
 | `EXECUTOR_TLS` | `true` | Habla TLS con Caddy, validando el certificado de Let's Encrypt |
+| `TRUSTED_PROXY_HOPS` | `1` | El límite de intentos de login/registro por IP usa la IP real del cliente (la que añade el proxy de Render a `X-Forwarded-For`), no la del proxy. Nunca lo subas por encima del número real de proxies: las entradas sobrantes las controla el cliente |
 
 Sobre el Key Value: `ipAllowList: []` = **ninguna** conexión desde Internet;
 solo servicios de tu workspace en Oregon. `maxmemoryPolicy: noeviction` evita
@@ -754,37 +783,55 @@ El seeder **aplica las migraciones él mismo** antes de insertar, así que
 funciona aunque la API todavía no haya arrancado nunca. Es idempotente
 (puedes repetirlo).
 
-1. Asegúrate de tener el secreto `NEON_DATABASE_URL`
-   ([sección 10](#10-secretos-de-github)).
+1. Asegúrate de tener los secretos `NEON_DATABASE_URL` y `DEMO_ADMIN_PASSWORD`
+   (opcional: `DEMO_MODERATOR_PASSWORD`) ([sección 10](#10-secretos-de-github)).
+   Sin `DEMO_ADMIN_PASSWORD` el workflow falla a propósito.
 2. **Actions** → **Seed demo data** → **Run workflow** → en *confirm* escribe
    `seed` → **Run workflow**.
 3. Al terminar (≈1–2 min) los logs muestran los usuarios y el concurso
-   creados.
+   creados (las contraseñas privadas **no** aparecen en los logs).
 
-Crea, todos con contraseña `password123`:
+Crea:
 
-| Usuario | Rol | Puede |
-| --- | --- | --- |
-| `alice` | admin | Todo, incluido `/admin` (roles, concursos, problemas, casos de prueba) |
-| `carol` | moderator | Ver todos los envíos de un concurso |
-| `bob` | user | Competir |
+| Usuario | Rol | Contraseña | Puede |
+| --- | --- | --- | --- |
+| `bob` | user | `password123` (**pública**, puedes anunciarla) | Competir |
+| `alice` | admin | secreto `DEMO_ADMIN_PASSWORD` (**privada**) | Todo, incluido `/admin` (roles, concursos, problemas, casos de prueba) |
+| `carol` | moderator | secreto `DEMO_MODERATOR_PASSWORD`, o el de admin si no existe (**privada**) | Crear/editar concursos y problemas, **ver casos de prueba ocultos** y todos los envíos |
 
 …y el **Arena Demo Contest** con tres problemas y casos ocultos.
 
-**Alternativa local** (si tienes Go 1.26.4+):
+> **Seguridad:** nunca publiques (README, capturas, portafolio) las contraseñas
+> de `alice` ni de `carol`: con ellas cualquiera administra tu demo en vivo.
+> Publica solo `bob` / `password123`.
+>
+> Si tu demo ya se sembró con la versión anterior (todos con `password123`),
+> vuelve a ejecutar este workflow con `DEMO_ADMIN_PASSWORD` configurado: el seed
+> **cambia** la contraseña de `alice` y `carol` y **cierra todas sus sesiones**.
+> Después entra como `alice` en `/admin` y devuelve a `user` cualquier cuenta
+> admin/moderator que no reconozcas.
+
+**Alternativa local** (si tienes Go 1.26.9+):
 
 ```powershell
 # PowerShell
 cd backend/services/api-gateway
 $env:APP_ENV = "dev"; $env:DATABASE_URL = "<NEON_DATABASE_URL>"
+$env:DEMO_ADMIN_PASSWORD = "<tu contraseña privada>"; $env:SEED_REQUIRE_PRIVATE_PASSWORDS = "true"
 go run ./cmd/seed
 ```
 
 ```bash
 # bash
 cd backend/services/api-gateway
-APP_ENV=dev DATABASE_URL='<NEON_DATABASE_URL>' go run ./cmd/seed
+APP_ENV=dev DATABASE_URL='<NEON_DATABASE_URL>' \
+  DEMO_ADMIN_PASSWORD='<tu contraseña privada>' SEED_REQUIRE_PRIVATE_PASSWORDS=true \
+  go run ./cmd/seed
 ```
+
+(En tu máquina local, contra la base de datos de desarrollo, puedes omitir
+`DEMO_ADMIN_PASSWORD`: los tres usuarios quedan con `password123` y el seed
+avisa de que eso solo vale en local.)
 
 ---
 
@@ -832,10 +879,12 @@ Repo → **Settings** → **Secrets and variables** → **Actions** → pestaña
 | Nombre | Valor | Lo usa |
 | --- | --- | --- |
 | `NEON_DATABASE_URL` | La cadena **directa** de Neon (sección 3.2) | `seed.yml` |
+| `DEMO_ADMIN_PASSWORD` | Contraseña privada de `alice` (admin), 12–72 caracteres (sección 2) | `seed.yml` |
+| `DEMO_MODERATOR_PASSWORD` *(opcional)* | Contraseña privada de `carol` (moderator); si falta usa la del admin | `seed.yml` |
 | `VM_HOST` | La IP pública de la VM (`129.146.10.20`) | `deploy-executor.yml` |
 | `VM_USER` | `ubuntu` (Oracle) o tu usuario (Google, sección 5.5) | `deploy-executor.yml` |
 | `VM_SSH_KEY` | Contenido **completo** de la clave **privada** `aether_vm`, incluidas las líneas `-----BEGIN …-----` y `-----END …-----` | `deploy-executor.yml` |
-| `VM_SSH_KNOWN_HOSTS` *(opcional, recomendado)* | Salida de `ssh-keyscan -t ed25519 <VM_IP>` | `deploy-executor.yml` (si falta, confía en la huella la primera vez) |
+| `VM_SSH_KNOWN_HOSTS` | La huella SSH de la VM (ver abajo) | `deploy-executor.yml` (**obligatorio**: sin él el deploy falla) |
 
 Para copiar la clave privada:
 
@@ -846,6 +895,19 @@ Get-Content "$HOME\.ssh\aether_vm" -Raw | Set-Clipboard   # Windows
 ```bash
 cat ~/.ssh/aether_vm      # macOS/Linux: copia toda la salida
 ```
+
+Para `VM_SSH_KNOWN_HOSTS`, lo más seguro es leer la huella **dentro** de la VM
+(por la consola web de Oracle o por una sesión SSH en la que ya confías) y
+anteponerle la IP:
+
+```bash
+# En la VM:
+echo "<VM_IP> $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
+```
+
+Alternativa aceptable para una demo (confía en la primera respuesta, desde tu
+PC y una sola vez): `ssh-keyscan -t ed25519 <VM_IP>`. Pega la línea completa
+como valor del secreto.
 
 **No** hace falta ningún secreto para GHCR: `executor-images.yml` usa el
 `GITHUB_TOKEN` automático (`permissions: packages: write`).
@@ -865,7 +927,7 @@ cat ~/.ssh/aether_vm      # macOS/Linux: copia toda la salida
 3. Abre **https://aether-judge.vercel.app**. Si la API dormía, verás abajo el
    aviso **"Despertando el servidor (plan gratuito de Render, ~1 min)…"**; se
    ocultará solo cuando la API responda.
-4. **Sign in** → `alice` / `password123`.
+4. **Sign in** → `alice` / tu `DEMO_ADMIN_PASSWORD`.
 5. Dashboard → **Arena Demo Contest** → entra.
 6. Envía una solución **en cada lenguaje** (C++, Python, Go) al primer problema.
    Ejemplo, si el problema es sumar dos enteros:

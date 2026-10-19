@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/caezu/arena/backend/services/api-gateway/internal/auth"
 	"github.com/caezu/arena/backend/services/api-gateway/internal/db"
 	"github.com/caezu/arena/backend/services/api-gateway/internal/events"
 	"github.com/caezu/arena/backend/services/api-gateway/internal/realtime"
@@ -165,9 +166,20 @@ func (s *server) leaderboardRows(ctx context.Context, contestID uuid.UUID) ([]ev
 }
 
 func (s *server) getProblem(w http.ResponseWriter, r *http.Request) {
-	_, problem, ok := s.problemFromPath(w, r)
+	contest, problem, ok := s.problemFromPath(w, r)
 	if !ok {
 		return
+	}
+
+	// Statements stay secret until the contest starts, or anyone could read
+	// (and prepare solutions for) an upcoming contest. Content authors still
+	// need to see their own work ahead of time.
+	if time.Now().Before(contest.StartsAt) {
+		user, _ := UserFrom(r.Context())
+		if !auth.Can(user.Role, auth.PermProblemManage) {
+			respondError(w, s.log, http.StatusForbidden, "contest_not_started", "the contest has not started yet")
+			return
+		}
 	}
 
 	respondJSON(w, s.log, http.StatusOK, problemDTO{
@@ -180,10 +192,21 @@ func (s *server) getProblem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) serveContestWS(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFrom(r.Context())
+	if !ok {
+		respondError(w, s.log, http.StatusUnauthorized, "unauthorized", "missing access token")
+		return
+	}
 	contest, ok := s.contestFromPath(w, r)
 	if !ok {
 		return
 	}
+	if !s.wsConns.acquire(user.ID) {
+		respondError(w, s.log, http.StatusTooManyRequests, "too_many_connections", "too many open live connections; close other tabs")
+		return
+	}
+	defer s.wsConns.release(user.ID)
+
 	realtime.ServeWS(w, r, s.hub, contest.ID, s.wsOriginPatterns, s.log)
 }
 

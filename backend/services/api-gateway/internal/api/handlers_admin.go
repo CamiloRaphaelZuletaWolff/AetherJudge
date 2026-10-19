@@ -187,6 +187,7 @@ func (s *server) createContest(w http.ResponseWriter, r *http.Request) {
 	for _, v := range []*requestError{
 		validateContestTitle(req.Title),
 		validateSlug(slug),
+		validateContestDescription(req.Description),
 		validateContestTimes(req.StartsAt, req.EndsAt),
 	} {
 		if v != nil {
@@ -233,6 +234,7 @@ func (s *server) updateContest(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, v := range []*requestError{
 		validateContestTitle(req.Title),
+		validateContestDescription(req.Description),
 		validateContestTimes(req.StartsAt, req.EndsAt),
 	} {
 		if v != nil {

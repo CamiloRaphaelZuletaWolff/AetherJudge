@@ -12,9 +12,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 
 	"github.com/caezu/arena/backend/services/executor/internal/lang"
@@ -110,6 +112,14 @@ type Result struct {
 // client-facing: enough for any real error message, small enough that a
 // template-bomb cannot balloon memory.
 const compileOutputLimit = 64 * 1024
+
+// sandboxNofile caps open file descriptors per sandbox process (soft = hard,
+// so user code cannot raise it). Compilers and runtimes need a few dozen.
+const sandboxNofile = 1024
+
+// lifetimeGrace pads the container's own self-destruct timer beyond the sum
+// of every phase timeout (image start, exec setup, inspect round-trips).
+const lifetimeGrace = 60 * time.Second
 
 // sourceWriteTimeout bounds writing the source file into the container —
 // pure I/O over the API socket, so seconds suffice even for max-size code.
@@ -237,8 +247,12 @@ func (e *Engine) createContainer(ctx context.Context, req Request) (string, erro
 	cfg := &container.Config{
 		Image: req.Spec.Image,
 		// The container idles; the executor drives every phase via exec and
-		// destroys it when done. Killing it is the timeout mechanism.
-		Cmd:             []string{"sleep", "86400"},
+		// destroys it when done. Killing it is the timeout mechanism. The
+		// idle process is bounded by the request's own phase budget, so a
+		// container leaked by an executor crash stops by itself instead of
+		// holding its memory/pids reservation for a day (ReapStale removes
+		// the stopped husk later).
+		Cmd:             []string{"sleep", strconv.Itoa(int(containerLifetime(req).Seconds()))},
 		User:            sandboxUser,
 		WorkingDir:      "/box",
 		NetworkDisabled: true,
@@ -261,6 +275,12 @@ func (e *Engine) createContainer(ctx context.Context, req Request) (string, erro
 			MemorySwap: req.Compile.MemoryBytes, // equal to Memory = swap disabled
 			NanoCPUs:   req.Compile.NanoCPUs,
 			PidsLimit:  &pids,
+			Ulimits: []*container.Ulimit{
+				// No core dumps: a crashing submission must not fill the
+				// tmpfs (or the host's core_pattern target).
+				{Name: "core", Soft: 0, Hard: 0},
+				{Name: "nofile", Soft: sandboxNofile, Hard: sandboxNofile},
+			},
 		},
 	}
 
@@ -270,6 +290,61 @@ func (e *Engine) createContainer(ctx context.Context, req Request) (string, erro
 			req.Spec.Image, err)
 	}
 	return resp.ID, nil
+}
+
+// containerLifetime is how long a sandbox container may live: every phase
+// timeout of the request plus a grace period. The idle `sleep` exits after
+// it, stopping the container even if the executor never comes back to it.
+func containerLifetime(req Request) time.Duration {
+	return req.CompileTimeout + req.RunTimeout + 2*sourceWriteTimeout + lifetimeGrace
+}
+
+// ReapStale force-removes sandbox containers created more than maxAge ago.
+// Normal executions remove their own container on every path; this catches
+// the ones an executor crash, OOM-kill or daemon hiccup left behind, so they
+// cannot accumulate into a resource-exhaustion DoS. maxAge must exceed the
+// longest legitimate execution so a live sandbox (possibly owned by another
+// executor sharing the daemon) is never touched.
+func (e *Engine) ReapStale(ctx context.Context, maxAge time.Duration) (int, error) {
+	list, err := e.cli.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", sandboxLabel)),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("sandbox: list sandbox containers: %w", err)
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	for _, c := range list {
+		if time.Unix(c.Created, 0).After(cutoff) {
+			continue
+		}
+		e.removeContainer(c.ID)
+		removed++
+	}
+	return removed, nil
+}
+
+// RunJanitor calls ReapStale immediately and then every interval until ctx
+// is cancelled. Failures are logged, never fatal.
+func (e *Engine) RunJanitor(ctx context.Context, interval, maxAge time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		n, err := e.ReapStale(ctx, maxAge)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			e.log.Warn("reap stale sandbox containers", "error", err)
+		case n > 0:
+			e.log.Warn("removed stale sandbox containers", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (e *Engine) updateResources(ctx context.Context, id string, r Resources) error {

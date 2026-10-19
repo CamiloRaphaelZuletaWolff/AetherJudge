@@ -1,6 +1,18 @@
-// Command seed populates the local database with a demo contest, three
-// problems with hidden test cases, and two demo accounts — everything needed
-// to exercise the full contest flow by hand. Idempotent: safe to re-run.
+// Command seed populates the database with a demo contest, three problems
+// with hidden test cases, and one demo account per RBAC tier — everything
+// needed to exercise the full contest flow by hand. Idempotent: safe to
+// re-run.
+//
+// Passwords: bob (role user) always gets the well-known demoPassword so a
+// public demo can advertise it. The privileged accounts — alice (admin) and
+// carol (moderator, who can read hidden test cases) — take their passwords
+// from DEMO_ADMIN_PASSWORD / DEMO_MODERATOR_PASSWORD (the moderator falls
+// back to the admin one). Without them, local runs fall back to demoPassword
+// with a warning; SEED_REQUIRE_PRIVATE_PASSWORDS=true (set by the GitHub
+// seed workflow for the public deployment) turns that into an error. When a
+// private password is given, an existing privileged account has its
+// password reset and every session revoked — the fix for a live demo whose
+// admin was seeded with the public password.
 package main
 
 import (
@@ -17,9 +29,45 @@ import (
 	"github.com/caezu/arena/backend/services/api-gateway/internal/db"
 )
 
-// demoPassword is for the two local demo accounts only; the seeder refuses
-// to run in production mode.
+// demoPassword is the well-known password of the public demo user (bob) and,
+// for local development only, of every demo account.
 const demoPassword = "password123"
+
+// minPrivatePasswordLen is the shortest accepted DEMO_*_PASSWORD.
+const minPrivatePasswordLen = 12
+
+// seedPasswords resolves the password for each privileged demo account.
+type seedPasswords struct {
+	admin, moderator string
+	// private is true when the privileged passwords came from the
+	// environment (and must never be logged).
+	private bool
+}
+
+func loadSeedPasswords() (seedPasswords, error) {
+	admin := os.Getenv("DEMO_ADMIN_PASSWORD")
+	moderator := os.Getenv("DEMO_MODERATOR_PASSWORD")
+
+	if admin == "" {
+		if moderator != "" {
+			return seedPasswords{}, errors.New("DEMO_MODERATOR_PASSWORD is set but DEMO_ADMIN_PASSWORD is not")
+		}
+		if os.Getenv("SEED_REQUIRE_PRIVATE_PASSWORDS") == "true" {
+			return seedPasswords{}, errors.New("DEMO_ADMIN_PASSWORD must be set: refusing to give the admin " +
+				"and moderator accounts the public demo password")
+		}
+		return seedPasswords{admin: demoPassword, moderator: demoPassword}, nil
+	}
+	if moderator == "" {
+		moderator = admin
+	}
+	for name, pw := range map[string]string{"DEMO_ADMIN_PASSWORD": admin, "DEMO_MODERATOR_PASSWORD": moderator} {
+		if len(pw) < minPrivatePasswordLen || len(pw) > 72 || pw == demoPassword {
+			return seedPasswords{}, fmt.Errorf("%s must be %d-72 bytes and not the public demo password", name, minPrivatePasswordLen)
+		}
+	}
+	return seedPasswords{admin: admin, moderator: moderator, private: true}, nil
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -42,6 +90,15 @@ func run() error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 
+	passwords, err := loadSeedPasswords()
+	if err != nil {
+		return err
+	}
+	if !passwords.private {
+		log.Warn("DEMO_ADMIN_PASSWORD is not set: alice (admin) and carol (moderator) get the public demo " +
+			"password. Fine on a local machine; NEVER do this on an internet-facing deployment.")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -60,13 +117,17 @@ func run() error {
 	demoUsers := []struct {
 		username string
 		role     string
+		password string
+		// private passwords come from the environment: never logged, and
+		// re-applied to an existing account.
+		private bool
 	}{
-		{"alice", string(auth.RoleAdmin)},
-		{"bob", string(auth.RoleUser)},
-		{"carol", string(auth.RoleModerator)},
+		{"alice", string(auth.RoleAdmin), passwords.admin, passwords.private},
+		{"bob", string(auth.RoleUser), demoPassword, false},
+		{"carol", string(auth.RoleModerator), passwords.moderator, passwords.private},
 	}
 	for _, du := range demoUsers {
-		hash, err := auth.HashPassword(demoPassword)
+		hash, err := auth.HashPassword(du.password)
 		if err != nil {
 			return fmt.Errorf("hash demo password: %w", err)
 		}
@@ -79,10 +140,23 @@ func run() error {
 				return fmt.Errorf("load existing demo user %s: %w", du.username, err)
 			}
 			log.Info("demo user already exists", "username", du.username)
+			if du.private {
+				// It may have been seeded earlier with the public password:
+				// rotate it and end every session that password opened.
+				if err := store.UpdateUserPassword(ctx, user.ID, hash); err != nil {
+					return fmt.Errorf("reset password for %s: %w", du.username, err)
+				}
+				if err := store.RevokeAllUserRefreshTokens(ctx, user.ID); err != nil {
+					return fmt.Errorf("revoke sessions for %s: %w", du.username, err)
+				}
+				log.Info("demo user password reset from environment; sessions revoked", "username", du.username)
+			}
 		case err != nil:
 			return fmt.Errorf("create demo user %s: %w", du.username, err)
+		case du.private:
+			log.Info("created demo user (password from environment)", "username", du.username)
 		default:
-			log.Info("created demo user", "username", du.username, "password", demoPassword)
+			log.Info("created demo user", "username", du.username, "password", du.password)
 		}
 
 		if user.Role != du.role {
@@ -181,10 +255,18 @@ func run() error {
 		log.Info("seeded problem", "ord", p.ord, "title", p.title, "cases", len(p.cases))
 	}
 
-	log.Info("seed complete",
-		"contest_id", contest.ID.String(),
-		"logins", "alice (admin) / carol (moderator) / bob (user)",
-		"password", demoPassword,
-	)
+	if passwords.private {
+		log.Info("seed complete",
+			"contest_id", contest.ID.String(),
+			"public_login", "bob (user) / "+demoPassword,
+			"private_logins", "alice (admin) / carol (moderator) — passwords from DEMO_ADMIN_PASSWORD / DEMO_MODERATOR_PASSWORD",
+		)
+	} else {
+		log.Info("seed complete",
+			"contest_id", contest.ID.String(),
+			"logins", "alice (admin) / carol (moderator) / bob (user)",
+			"password", demoPassword,
+		)
+	}
 	return nil
 }

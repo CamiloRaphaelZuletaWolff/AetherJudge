@@ -67,6 +67,7 @@ full set):
 | `EXECUTOR_TLS` | `true` when the executor sits behind a public TLS proxy (Caddy) |
 | `EXECUTOR_AUTH_TOKEN` | shared bearer token; must equal the executor's `EXECUTOR_AUTH_TOKEN` |
 | `FRONTEND_ORIGIN` | the exact frontend origin, e.g. `https://app.vercel.app` |
+| `TRUSTED_PROXY_HOPS` | `1` on Render (per-IP login/signup limits key on the client IP its proxy appends to `X-Forwarded-For`, not on the proxy's own IP) |
 
 ## Frontend on Vercel
 

@@ -19,6 +19,8 @@ die() {
 }
 
 [ -f .env ] || die "infra/vm/.env not found. Run: cp .env.example .env && nano .env"
+# .env holds EXECUTOR_AUTH_TOKEN (and maybe GHCR_TOKEN): owner-only.
+chmod 600 .env
 set -a
 # shellcheck disable=SC1091
 . ./.env

@@ -108,3 +108,16 @@ func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) (
 	}
 	return u, nil
 }
+
+// UpdateUserPassword replaces a user's password hash, or returns ErrNotFound
+// if no such user exists.
+func (s *Store) UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE users SET password_hash = $2 WHERE id = $1`, id, passwordHash)
+	if err != nil {
+		return fmt.Errorf("db: update user password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

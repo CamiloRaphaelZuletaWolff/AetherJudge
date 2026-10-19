@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,5 +186,22 @@ func TestRunListensAndShutsDown(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return within 5s of context cancellation")
+	}
+}
+
+// TestReflectionNotRegistered pins that the executor never exposes gRPC
+// server reflection: the port is internet-facing (behind Caddy) and API
+// enumeration helps nobody but an attacker.
+func TestReflectionNotRegistered(t *testing.T) {
+	t.Parallel()
+
+	srv := New("unused", discardLogger(), &stubExecutor{}, "")
+	for name := range srv.grpcSrv.GetServiceInfo() {
+		if strings.Contains(name, "reflection") {
+			t.Errorf("service %q is registered; reflection must stay disabled", name)
+		}
+	}
+	if _, ok := srv.grpcSrv.GetServiceInfo()[executorv1.ExecutorService_ServiceDesc.ServiceName]; !ok {
+		t.Error("ExecutorService is not registered")
 	}
 }

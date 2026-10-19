@@ -6,7 +6,7 @@
 # paths Arena never exercises. Each allowlisted ID is justified in
 # docs/security/threat-model.md and docs/adr/0013-security-hardening.md.
 #
-# Requires Go >= 1.26.4 (older patch releases carry stdlib advisories that are
+# Requires Go >= 1.26.9 (older patch releases carry stdlib advisories that are
 # fixed there; the go.mod `go` directive pins this).
 set -uo pipefail
 

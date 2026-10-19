@@ -10,3 +10,11 @@ allowBuilds:
 # regardless of cache state.
 overrides:
   eslint: 9.39.4
+  # Security floors for transitive dependencies (pnpm audit --prod). Patch/
+  # minor bumps within the same major as what next / monaco-editor request.
+  dompurify: ^3.4.17
+  "postcss@<8.5.30": ^8.5.30
+  "nanoid@>=3.0.0 <3.3.20": ^3.3.20
+  "source-map-js@<1.2.2": ^1.2.2
+  "browserslist@<4.29.3": ^4.29.3
+  "baseline-browser-mapping@<2.11.29": ^2.11.29

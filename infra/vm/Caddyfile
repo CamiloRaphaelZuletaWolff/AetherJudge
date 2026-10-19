@@ -19,6 +19,11 @@
 	# (EXECUTOR_AUTH_TOKEN); Caddy only adds TLS.
 	@grpc path /executor.v1.ExecutorService/* /grpc.health.v1.Health/*
 	handle @grpc {
+		# Largest legitimate Execute call is ~2.3 MB (code + stdin +
+		# expected output); the executor itself caps messages at 3 MiB.
+		request_body {
+			max_size 4MB
+		}
 		# h2c = cleartext HTTP/2 to the executor on the private compose
 		# network. gRPC requires HTTP/2 end to end.
 		reverse_proxy h2c://executor:9090

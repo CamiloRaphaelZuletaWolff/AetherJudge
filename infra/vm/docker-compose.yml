@@ -27,8 +27,20 @@ services:
     # lets it open /var/run/docker.sock. deploy.sh fills DOCKER_GID in.
     group_add:
       - "${DOCKER_GID:?DOCKER_GID is not set - run deploy.sh, or: getent group docker | cut -d: -f3}"
+    # RESIDUAL RISK: access to docker.sock is root-equivalent on this VM
+    # (anyone who controls this process can start a privileged container).
+    # It is inherent to the sibling-container sandbox design (ADR-0005); the
+    # mitigations are that the executor only ever creates locked-down
+    # sandboxes, is reachable solely through Caddy + the bearer token, and
+    # its own container is hardened below. Treat the VM as single-purpose.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    # The executor writes nothing to disk and needs no Linux capabilities.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       EXECUTOR_GRPC_ADDR: ":9090"
       EXECUTOR_METRICS_ADDR: ":9101"

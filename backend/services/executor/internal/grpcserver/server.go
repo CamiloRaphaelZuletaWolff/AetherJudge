@@ -18,6 +18,13 @@ import (
 	executorv1 "github.com/caezu/arena/backend/pkg/pb/executor/v1"
 )
 
+// maxRecvMsgBytes bounds one inbound RPC message. The largest legitimate
+// ExecuteRequest is code (256 KiB) + stdin (1 MiB) + expected output (1 MiB)
+// — the service's own payload caps — so 3 MiB leaves headroom while keeping
+// what any caller (authenticated or not: the message is decoded before the
+// auth interceptor runs) can make the server buffer explicitly small.
+const maxRecvMsgBytes = 3 << 20
+
 // Server is the executor gRPC server.
 type Server struct {
 	grpcSrv   *grpc.Server
@@ -38,6 +45,7 @@ type Server struct {
 func New(addr string, log *slog.Logger, executor executorv1.ExecutorServiceServer, authToken string) *Server {
 	authz := newTokenAuthorizer(authToken)
 	grpcSrv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxRecvMsgBytes),
 		// Server spans continuing the gateway's trace context (no-op when
 		// tracing is disabled).
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
@@ -56,6 +64,10 @@ func New(addr string, log *slog.Logger, executor executorv1.ExecutorServiceServe
 	healthSrv := health.NewServer()
 	healthpb.RegisterHealthServer(grpcSrv, healthSrv)
 	healthSrv.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+
+	// gRPC server reflection is deliberately NOT registered: it would let
+	// anyone who reaches the port enumerate the API, and nothing needs it
+	// (grpcurl can use the .proto files under backend/proto instead).
 
 	return &Server{
 		grpcSrv:   grpcSrv,

@@ -67,7 +67,8 @@ escalate privileges, and (e) break out of the container.
 | Kernel attack surface (syscalls) | Docker's **default seccomp profile remains active** — `SecurityOpt` is *not* set to `seccomp=unconfined`, so the ~40 dangerous syscalls Docker blocks by default stay blocked. (See "Seccomp decision" below.) |
 | CPU / memory / fork-bomb DoS | Per-phase `Memory` (+ `MemorySwap` equal to it → swap disabled), `NanoCPUs`, and `PidsLimit` quotas, applied at create and tightened via `ContainerUpdate` before the run phase. |
 | Wall-clock DoS | The container is `sleep`-driven and killed on a deadline; every phase has a timeout. |
-| Container leak / resource exhaustion over time | Containers are labelled `arena.sandbox` and **force-removed on every exit path**; an integration test asserts zero leak. |
+| Container leak / resource exhaustion over time | Containers are labelled `arena.sandbox` and **force-removed on every exit path**; an integration test asserts zero leak. The idle `sleep` is bounded by the request's phase budget (a container orphaned by an executor crash stops by itself), and a janitor removes labelled sandboxes older than any legitimate execution at startup and every 5 minutes. |
+| File-descriptor / core-dump abuse | `ulimit nofile=1024` (soft = hard) and `core=0`. `nproc` is deliberately not set: every sandbox shares uid 10001 without user namespaces, so RLIMIT_NPROC would be counted across concurrent sandboxes; the per-container `PidsLimit` covers fork bombs instead. |
 | Compile-bomb / output flooding | Generous-but-bounded compile limits, then a strict run envelope; output is size-capped (`EXECUTOR_OUTPUT_LIMIT_KB`). |
 
 **Pipeline shape (ADR-0006):** exec-driven — no bind mounts, no `docker cp`.
@@ -82,6 +83,13 @@ re-measuring against the pre-warmed caches). Combined with `CapDrop: ALL` and
 `no-new-privileges`, the marginal value of a custom profile is low and the
 breakage risk is real. A tighter per-language profile is recorded as future
 work, not a Phase 8 deliverable.
+
+**Residual risk — the Docker socket.** The executor talks to the host Docker
+daemon (sibling containers), and access to `docker.sock` is root-equivalent on
+that host — as is the VM SSH user's `docker` group membership. On the
+single-VM deployment the executor container itself runs as uid 10001 with
+`read_only`, `cap_drop: ALL` and `no-new-privileges`, and is reachable only via
+Caddy + the bearer token; the VM must be treated as single-purpose.
 
 **Residual risk:** a kernel 0-day reachable through the default-seccomp syscall
 surface could still permit escape. We do not run gVisor/Kata or a per-pod
@@ -139,12 +147,18 @@ holds.
 status, duration, and — when tracing is on — a `trace_id` correlating the HTTP
 request through the queue, the gRPC call, and each sandbox phase.
 
-**Residual risk — rate-limit keying behind a proxy.** `byIP` reads
-`r.RemoteAddr`. Behind a reverse proxy (e.g. Render) that is the *proxy's* IP,
-so per-IP auth limits degrade toward a shared global bucket. We do **not** trust
-`X-Forwarded-For` today, because naive XFF trust is itself spoofable. The
-mitigation path (a configurable trusted-proxy hop count) is recorded as future
-work; per-user limits on the expensive routes are unaffected.
+**Rate-limit keying behind a proxy.** Per-IP limits key on `clientIP`:
+the TCP peer by default, or — with `TRUSTED_PROXY_HOPS=N` (Render: 1) — the
+N-th `X-Forwarded-For` entry from the right, i.e. the address the outermost
+trusted proxy saw. Entries further left are client-supplied and never used, so
+the key cannot be spoofed as long as N does not exceed the real hop count.
+Login/signup and refresh use separate buckets. WebSocket connections are capped
+per user (8 per gateway process).
+
+**Residual risk — WebSocket token in the query string.** Browsers cannot set
+headers on a WebSocket upgrade, so the access token rides `?access_token=`.
+The gateway never logs query strings, but an edge proxy's access logs might.
+The token is short-lived (15 min) and only opens the read-only room feed.
 
 ---
 

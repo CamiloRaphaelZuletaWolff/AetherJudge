@@ -55,6 +55,10 @@ services:
         value: "true"                              # TLS to Caddy on the VM, verified against public CAs
       - key: EXECUTOR_AUTH_TOKEN
         sync: false                                # same value as EXECUTOR_AUTH_TOKEN in the VM's infra/vm/.env
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"                                 # Render's edge proxy appends the real client IP to
+                                                   # X-Forwarded-For; per-IP login/signup rate limits key on it
+                                                   # (0 would make every user share the proxy's single bucket)
       - key: FRONTEND_ORIGIN
         sync: false                                # exactly https://aether-judge.vercel.app — no trailing slash;
                                                    # gates CORS and the WebSocket origin check

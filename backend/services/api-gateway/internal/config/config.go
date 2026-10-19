@@ -69,6 +69,14 @@ type Config struct {
 	// Kubernetes it is set to the pod name.
 	ConsumerName string
 
+	// TrustedProxyHops is how many reverse proxies in front of the gateway
+	// append to X-Forwarded-For (0 = none: rate limits key on the TCP peer).
+	// On Render use 1: the entry its edge appends is never client-supplied.
+	// Never set it higher than the real hop count: the extra entries are
+	// client-controlled and would let an attacker pick their own rate-limit
+	// key.
+	TrustedProxyHops int
+
 	// Rate limits, per principal per minute.
 	AuthRatePerMin   int
 	SubmitRatePerMin int
@@ -109,6 +117,7 @@ func Load() (Config, error) {
 		{&cfg.AuthRatePerMin, "RATE_LIMIT_AUTH_PER_MIN", 10},
 		{&cfg.SubmitRatePerMin, "RATE_LIMIT_SUBMIT_PER_MIN", 6},
 		{&cfg.RunRatePerMin, "RATE_LIMIT_RUN_PER_MIN", 10},
+		{&cfg.TrustedProxyHops, "TRUSTED_PROXY_HOPS", 0},
 	}
 	for _, f := range intFields {
 		v, err := getEnvInt(f.key, f.fallback)
@@ -144,6 +153,10 @@ func Load() (Config, error) {
 
 // IsProduction reports whether the gateway runs in production mode.
 func (c Config) IsProduction() bool { return c.Env == "production" }
+
+// maxTrustedProxyHops bounds TRUSTED_PROXY_HOPS; no sane deployment chains
+// more reverse proxies than this.
+const maxTrustedProxyHops = 5
 
 // envPlaceholderSecret is the value shipped in .env.example; it must never
 // be accepted in production either.
@@ -205,6 +218,9 @@ func (c Config) validate() error {
 		if p.value <= 0 {
 			return fmt.Errorf("config: %s must be positive", p.name)
 		}
+	}
+	if c.TrustedProxyHops < 0 || c.TrustedProxyHops > maxTrustedProxyHops {
+		return fmt.Errorf("config: TRUSTED_PROXY_HOPS must be between 0 and %d", maxTrustedProxyHops)
 	}
 	// Workers may be 0 (a producer-only web tier) but never negative.
 	if c.JudgeWorkers < 0 {
